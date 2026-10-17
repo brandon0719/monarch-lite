@@ -1,0 +1,21 @@
+.env
+*.db
+*.db-wal
+*.db-shm
+*.db.pre-restore-*
+*.db.restore-tmp
+*.tmp
+.venv/
+node_modules/
+__pycache__/
+.DS_Store
+
+# personal documents: comp letters, requirements and design docs (kept local, never published)
+docs/Terms of Employment*
+docs/BRD.md
+docs/superpowers/
+
+frontend/dist/
+
+# brainstorming/SDD scratch
+.superpowers/

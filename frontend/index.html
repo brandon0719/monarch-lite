@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>monarch-lite</title>
+    <script>
+      // Set the theme before first paint (no light/dark flash). Mirrors getTheme() in src/theme.ts.
+      (function () {
+        var t = new URLSearchParams(location.search).get('theme');
+        if (t !== 'light' && t !== 'dark' && t !== 'system') {
+          t = null;
+          try { t = localStorage.getItem('monarch-lite-theme'); } catch (e) {}
+        }
+        document.documentElement.dataset.theme = t === 'light' || t === 'dark' || t === 'system' ? t : 'system';
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
