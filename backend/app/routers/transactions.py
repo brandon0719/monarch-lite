@@ -1,5 +1,6 @@
 """FR-TXN-01..04, FR-TXN-07 unlink."""
 import datetime as dt
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -10,8 +11,11 @@ from ..db import get_db
 from ..models import Account, Category, Tag, Transaction, utcnow
 from ..services.tags import get_or_create_tag
 from ..services.transfers import unlink
+from .category_budgets import MAX_AMOUNT_CENTS
+from .params import MAX_ID, Id, IdBody, OptionalIdQuery
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
+AmountQuery = Annotated[int | None, Query(ge=-MAX_AMOUNT_CENTS, le=MAX_AMOUNT_CENTS)]
 
 
 class TagOut(BaseModel):
@@ -45,7 +49,7 @@ class TxnPage(BaseModel):
 
 
 class TxnPatch(BaseModel):
-    category_id: int | None = None
+    category_id: IdBody | None = None
     merchant: str | None = None
     notes: str | None = None
     tag_names: list[str] | None = None
@@ -63,7 +67,7 @@ class TxnPatch(BaseModel):
 
 
 class ReviewIn(BaseModel):
-    ids: list[int]
+    ids: list[IdBody]
 
 
 def to_out(t: Transaction) -> TxnOut:
@@ -88,7 +92,10 @@ def to_out(t: Transaction) -> TxnOut:
 def _parse_cursor(cursor: str) -> tuple[dt.date, int]:
     try:
         day, txn_id = cursor.split(":")
-        return dt.date.fromisoformat(day), int(txn_id)
+        day, txn_id = dt.date.fromisoformat(day), int(txn_id)
+        if not 1 <= txn_id <= MAX_ID:
+            raise ValueError
+        return day, txn_id
     except ValueError:
         raise HTTPException(422, "Invalid cursor") from None
 
@@ -97,14 +104,14 @@ def _parse_cursor(cursor: str) -> tuple[dt.date, int]:
 def list_transactions(
     start: dt.date | None = None,
     end: dt.date | None = None,
-    account_id: int | None = None,
-    category_id: int | None = None,
+    account_id: OptionalIdQuery = None,
+    category_id: OptionalIdQuery = None,
     uncategorized: bool = False,
-    min_cents: int | None = None,
-    max_cents: int | None = None,
+    min_cents: AmountQuery = None,
+    max_cents: AmountQuery = None,
     q: str | None = None,
     merchant: str | None = None,
-    tag_id: int | None = None,
+    tag_id: OptionalIdQuery = None,
     needs_review: bool = False,
     cursor: str | None = None,
     limit: int = Query(100, ge=1, le=500),
@@ -153,7 +160,7 @@ def list_transactions(
 
 
 @router.patch("/{txn_id}", response_model=TxnOut)
-def patch_transaction(txn_id: int, body: TxnPatch, db: Session = Depends(get_db)):
+def patch_transaction(txn_id: Id, body: TxnPatch, db: Session = Depends(get_db)):
     txn = db.get(Transaction, txn_id)
     if txn is None:
         raise HTTPException(404, "Transaction not found")
@@ -188,7 +195,7 @@ def mark_reviewed(body: ReviewIn, db: Session = Depends(get_db)) -> dict[str, in
 
 
 @router.delete("/{txn_id}/transfer", status_code=204)
-def unlink_transfer(txn_id: int, db: Session = Depends(get_db)) -> None:
+def unlink_transfer(txn_id: Id, db: Session = Depends(get_db)) -> None:
     txn = db.get(Transaction, txn_id)
     if txn is None:
         raise HTTPException(404, "Transaction not found")

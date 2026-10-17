@@ -5,7 +5,9 @@ import { api } from './api'
 import { formatDateTime } from './format'
 import Accounts from './pages/Accounts'
 import Categories from './pages/Categories'
+import Goals from './pages/Goals'
 import Overview from './pages/Overview'
+import Recurring from './pages/Recurring'
 import Rules from './pages/Rules'
 import Settings from './pages/Settings'
 import Spending from './pages/Spending'
@@ -16,6 +18,8 @@ const NAV: [string, string][] = [
   ['/overview', 'Overview'],
   ['/transactions', 'Transactions'],
   ['/spending', 'Spending'],
+  ['/recurring', 'Recurring'],
+  ['/goals', 'Goals'],
   ['/accounts', 'Accounts'],
   ['/rules', 'Rules'],
   ['/categories', 'Categories'],
@@ -101,6 +105,8 @@ export default function App() {
             <Route path="/overview" element={<Overview />} />
             <Route path="/transactions" element={<Transactions />} />
             <Route path="/spending" element={<Spending />} />
+            <Route path="/recurring" element={<Recurring />} />
+            <Route path="/goals" element={<Goals />} />
             <Route path="/accounts" element={<Accounts />} />
             <Route path="/rules" element={<Rules />} />
             <Route path="/categories" element={<Categories />} />

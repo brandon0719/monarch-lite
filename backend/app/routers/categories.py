@@ -1,7 +1,7 @@
 """FR-CAT-01/02. DELETE with replacement_id doubles as merge."""
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..models import Category, Rule, Transaction
 from ..services.transfers import CARD_PAYMENT, TRANSFER
+from .params import Id, IdQuery
 
 router = APIRouter(prefix="/api/categories", tags=["categories"])
 Bucket = Literal["needs", "wants", "other", "savings", "income", "excluded"]
@@ -92,7 +93,7 @@ def create_category(body: CategoryIn, db: Session = Depends(get_db)):
 
 
 @router.patch("/{category_id}", response_model=CategoryOut)
-def patch_category(category_id: int, body: CategoryPatch, db: Session = Depends(get_db)):
+def patch_category(category_id: Id, body: CategoryPatch, db: Session = Depends(get_db)):
     category = _get(db, category_id)
     if category.name in LOCKED and body.name is not None and body.name != category.name:
         raise HTTPException(409, "This category is used by transfer detection and can't be renamed")
@@ -103,7 +104,7 @@ def patch_category(category_id: int, body: CategoryPatch, db: Session = Depends(
 
 
 @router.delete("/{category_id}", status_code=204)
-def delete_category(category_id: int, replacement_id: int = Query(...), db: Session = Depends(get_db)) -> None:
+def delete_category(category_id: Id, replacement_id: IdQuery, db: Session = Depends(get_db)) -> None:
     if replacement_id == category_id:
         raise HTTPException(422, "Pick a different category to move transactions to")
     source = _get(db, category_id)

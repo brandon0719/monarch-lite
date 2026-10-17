@@ -8,7 +8,19 @@ from fastapi.staticfiles import StaticFiles
 
 from . import config, scheduler
 from .db import SessionLocal
-from .routers import accounts, budget, categories, category_budgets, data, overview, rules, sync, transactions
+from .routers import (
+    accounts,
+    budget,
+    categories,
+    category_budgets,
+    data,
+    goals,
+    overview,
+    recurring,
+    rules,
+    sync,
+    transactions,
+)
 
 logging.basicConfig(level=logging.INFO)
 
@@ -30,7 +42,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="monarch-lite", lifespan=lifespan)
 # Blocks DNS rebinding: a hostile page can resolve its own name to 127.0.0.1, but its Host header stays foreign.
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"])
-for module in (accounts, sync, transactions, categories, rules, data, overview, budget, category_budgets):
+for module in (accounts, sync, transactions, categories, rules, data, overview, budget, category_budgets, recurring, goals):
     app.include_router(module.router)
 
 

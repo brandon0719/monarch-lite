@@ -22,6 +22,39 @@ function topWithOther(rows: SpendingRow[]): SpendingRow[] {
   return [...sorted.slice(0, TOP_N), { category_id: null, name: 'Other', cents: rest }]
 }
 
+function UpcomingCard() {
+  const up = useQuery({ queryKey: ['recurring', 'upcoming', 30], queryFn: () => api.upcoming(30) })
+  const rec = useQuery({ queryKey: ['recurring'], queryFn: api.recurring })
+  const alerts = rec.data?.alerts.length ?? 0
+  return (
+    <section className="card" aria-labelledby="ov-upcoming">
+      <h2 className="card-title" id="ov-upcoming">Upcoming</h2>
+      {up.isPending && <p className="muted" role="status">Loading…</p>}
+      {up.isError && <p className="error" role="alert">{up.error.message}</p>}
+      {up.data && (up.data.rows.length === 0 ? (
+        <p className="muted">Nothing expected in the next 30 days.</p>
+      ) : (
+        <ul className="recent-list">
+          {up.data.rows.slice(0, 5).map((r) => (
+            <li key={`${r.item_id}-${r.date}`} className="up-row">
+              <span className="recent-main">
+                <span className="recent-merchant">{r.name}</span>
+                <span className="tx-sub">{formatDate(r.date)}{r.late && <span className="error"> · Late</span>}</span>
+              </span>
+              <span className={`amount${r.amount_cents > 0 ? ' pos' : ''}`}>{formatCents(r.amount_cents)}</span>
+            </li>
+          ))}
+        </ul>
+      ))}
+      <div className="up-foot">
+        {rec.isError ? <span className="muted">Alerts unavailable</span>
+          : alerts > 0 && <span className="error">{alerts} {alerts === 1 ? 'alert' : 'alerts'}</span>}
+        <Link className="tile-link" to="/recurring">See recurring →</Link>
+      </div>
+    </section>
+  )
+}
+
 export default function Overview() {
   const overview = useQuery({ queryKey: ['overview'], queryFn: () => api.overview() })
   const categories = useQuery({ queryKey: ['categories'], queryFn: api.categories })
@@ -93,6 +126,8 @@ export default function Overview() {
         </section>
 
         <div className="ov-side">
+          <UpcomingCard />
+
           <section className="card" aria-labelledby="ov-balances">
             <h2 className="card-title" id="ov-balances">Balances</h2>
             <dl className="balances">

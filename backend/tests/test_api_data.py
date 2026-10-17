@@ -25,3 +25,17 @@ def test_backup_endpoint(client, tmp_path, monkeypatch):
     monkeypatch.setattr(config, "BACKUP_DIR", tmp_path / "backups")
     path = client.post("/api/backups").json()["path"]
     assert path.startswith(str(tmp_path / "backups"))
+
+
+def test_export_covers_every_table_including_goals(client, db):
+    from app.db import Base
+
+    assert set(TABLES) == set(Base.metadata.tables)
+    account = make_account(db, name="Online Savings", type="savings")
+    goal = client.post("/api/goals", json={"name": "Emergency", "target_cents": 500000, "kind": "linked", "account_ids": [account.id]}).json()
+    manual = client.post("/api/goals", json={"name": "Trip", "target_cents": 200000, "kind": "manual"}).json()
+    client.post(f"/api/goals/{manual['id']}/contributions", json={"date": "2026-10-01", "amount_cents": 15000})
+    data = json.loads(zipfile.ZipFile(io.BytesIO(client.get("/api/export").content)).read("export.json"))
+    assert {g["name"] for g in data["goals"]} == {"Emergency", "Trip"}
+    assert data["goal_accounts"] == [{"goal_id": goal["id"], "account_id": account.id}]
+    assert [c["amount_cents"] for c in data["goal_contributions"]] == [15000]

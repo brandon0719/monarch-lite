@@ -8,16 +8,18 @@ from ..db import get_db
 from ..models import Account, Category, Rule
 from ..services.rules import apply_all, load_rules
 from ..services.tags import get_or_create_tag
+from .category_budgets import MAX_AMOUNT_CENTS
+from .params import Id, IdBody
 
 router = APIRouter(prefix="/api/rules", tags=["rules"])
 
 
 class RuleIn(BaseModel):
     contains_text: str = Field(min_length=1)
-    account_id: int | None = None
-    amount_min_cents: int | None = None
-    amount_max_cents: int | None = None
-    set_category_id: int | None = None
+    account_id: IdBody | None = None
+    amount_min_cents: int | None = Field(default=None, ge=-MAX_AMOUNT_CENTS, le=MAX_AMOUNT_CENTS)
+    amount_max_cents: int | None = Field(default=None, ge=-MAX_AMOUNT_CENTS, le=MAX_AMOUNT_CENTS)
+    set_category_id: IdBody | None = None
     set_merchant: str | None = None
     add_tag_name: str | None = None
 
@@ -56,7 +58,7 @@ class RuleOut(BaseModel):
 
 
 class ReorderIn(BaseModel):
-    ids: list[int]
+    ids: list[IdBody]
 
 
 def _out(rule: Rule) -> RuleOut:
@@ -112,7 +114,7 @@ def create_rule(body: RuleIn, db: Session = Depends(get_db)):
 
 
 @router.patch("/{rule_id}", response_model=RuleOut)
-def update_rule(rule_id: int, body: RuleIn, db: Session = Depends(get_db)):
+def update_rule(rule_id: Id, body: RuleIn, db: Session = Depends(get_db)):
     rule = _get(db, rule_id)
     _fill(db, rule, body)
     db.commit()
@@ -120,7 +122,7 @@ def update_rule(rule_id: int, body: RuleIn, db: Session = Depends(get_db)):
 
 
 @router.delete("/{rule_id}", status_code=204)
-def delete_rule(rule_id: int, db: Session = Depends(get_db)) -> None:
+def delete_rule(rule_id: Id, db: Session = Depends(get_db)) -> None:
     db.delete(_get(db, rule_id))
     db.commit()
 
