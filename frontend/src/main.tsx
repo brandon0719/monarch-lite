@@ -8,9 +8,9 @@ import { applyTheme, getTheme } from './theme'
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 30_000, retry: 1 } } })
 
-// Derived views (overview, budget meters, category budgets, cash flow, recurring) are computed from transactions/accounts/categories/rules.
+// Derived views (overview, budget meters, category budgets, cash flow, recurring, net worth, holdings, allocation) are computed from transactions/accounts/categories/rules.
 // Rather than touching every page's invalidations, refetch them whenever ANY mutation succeeds.
-const DERIVED_VIEWS = ['overview', 'budget', 'cashflow', 'category-budgets', 'breakdown', 'recurring', 'goals']
+const DERIVED_VIEWS = ['overview', 'budget', 'cashflow', 'category-budgets', 'breakdown', 'recurring', 'goals', 'networth', 'holdings', 'allocation']
 queryClient.getMutationCache().subscribe((event) => {
   if (event.type === 'updated' && event.action.type === 'success') {
     for (const key of DERIVED_VIEWS) void queryClient.invalidateQueries({ queryKey: [key] })

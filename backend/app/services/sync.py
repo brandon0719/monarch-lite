@@ -3,12 +3,14 @@ import datetime as dt
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from ..models import Account, BalanceSnapshot, SyncRun, Transaction, utcnow
+from ..models import Account, BalanceSnapshot, Holding, SyncRun, Transaction, utcnow
 from ..money import to_cents
+from ..routers.category_budgets import MAX_AMOUNT_CENTS
 from . import simplefin
 from .rules import apply_to, load_rules
 from .transfers import detect_transfers
@@ -136,6 +138,34 @@ def _fetch_all(fetch: Fetch, start: dt.date, end: dt.date) -> list[dict]:
     return [fetch(s, e) for s, e in date_chunks(start, end)]
 
 
+def _replace_holdings(db: Session, account: Account, holdings: list[dict], today: dt.date) -> None:
+    """Holdings are point-in-time: the latest payload's list replaces the account's set.
+
+    A holding with an unusable symbol, market value or share count is skipped, and an unusable cost basis is
+    stored as unknown; holdings are secondary data and must never fail the sync.
+    """
+    db.execute(delete(Holding).where(Holding.account_id == account.id))
+    for h in holdings:
+        if not isinstance(h, dict):
+            continue
+        symbol = (h.get("symbol") or "").strip()
+        shares = str(h.get("shares") or "0").replace(",", "").strip()
+        try:
+            if not symbol or h.get("market_value") is None or not Decimal(shares).is_finite():
+                continue
+            value = to_cents(h["market_value"])
+        except (ValueError, ArithmeticError):
+            continue
+        try:
+            basis = to_cents(h["cost_basis"]) if h.get("cost_basis") is not None else 0
+        except (ValueError, ArithmeticError):
+            basis = 0
+        if abs(value) > MAX_AMOUNT_CENTS or abs(basis) > MAX_AMOUNT_CENTS:  # would overflow at flush
+            continue
+        db.add(Holding(account=account, symbol=symbol, description=(h.get("description") or symbol).strip(),
+                       shares=shares, market_value_cents=value, cost_basis_cents=basis or None, as_of=today))
+
+
 def _ingest(db: Session, payloads: list[dict], today: dt.date, state: _State) -> None:
     for payload in payloads:
         state.errors += [e for e in payload.get("errors") or [] if e not in state.errors]
@@ -147,6 +177,8 @@ def _ingest(db: Session, payloads: list[dict], today: dt.date, state: _State) ->
             if account.id not in state.balance_dates:  # balances are point-in-time, not per window
                 if account.closed_at is None and acct.get("balance") is not None:
                     _upsert_snapshot(db, account, acct["balance"], today)
+                if account.closed_at is None and isinstance(acct.get("holdings"), list):
+                    _replace_holdings(db, account, acct["holdings"], today)
                 stamp = acct.get("balance-date")
                 state.balance_dates[account.id] = dt.datetime.fromtimestamp(stamp, dt.UTC).date() if stamp else today
             state.new_txns += _insert_new(db, account, acct)

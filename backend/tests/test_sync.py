@@ -277,3 +277,98 @@ def test_manual_accounts_never_widen_the_window_or_go_stale(db):
     sync.run_sync(db, fetch=fetcher(payload()), now=NOW)
     db.refresh(manual)
     assert manual.last_error is None and manual.last_synced_at is None
+
+
+def brokerage(holdings):
+    return {"errors": [], "accounts": [{
+        "id": "sf-inv", "name": "Brokerage", "org": {"name": "Broker"},
+        "balance": "1500.00", "balance-date": epoch(2026, 10, 16), "transactions": [], "holdings": holdings,
+    }]}
+
+
+def test_holdings_are_replaced_on_each_sync(db):
+    from app.models import Holding
+    first = [
+        {"id": "h1", "symbol": "VTI", "description": "Total Market ETF", "shares": "5.5", "market_value": "1400.00", "cost_basis": "1000.00"},
+        {"id": "h2", "symbol": "QSWEEP", "description": "Deposit Sweep Account", "shares": "100.00", "market_value": "100.00", "cost_basis": "0.00"},
+        {"id": "h3", "symbol": "", "description": "No symbol", "shares": "1", "market_value": "1.00"},
+        {"id": "h4", "symbol": "BAD", "description": "No value", "shares": "1"},
+    ]
+    sync.run_sync(db, fetch=fetcher(brokerage(first)), now=NOW)
+    rows = db.scalars(select(Holding).order_by(Holding.symbol)).all()
+    assert [(h.symbol, h.shares, h.market_value_cents, h.cost_basis_cents, h.as_of) for h in rows] == [
+        ("QSWEEP", "100.00", 10000, None, NOW.date()), ("VTI", "5.5", 140000, 100000, NOW.date()),
+    ]
+    second = [{"id": "h1", "symbol": "VTI", "description": "Total Market ETF", "shares": "6", "market_value": "1500.00", "cost_basis": "1100.00"}]
+    sync.run_sync(db, fetch=fetcher(brokerage(second)), now=NOW + dt.timedelta(days=1))
+    assert [(h.symbol, h.shares) for h in db.scalars(select(Holding)).all()] == [("VTI", "6")]
+
+
+def test_payload_without_holdings_leaves_them_and_closed_accounts_are_untouched(db):
+    from app.models import Holding
+    vti = [{"id": "h1", "symbol": "VTI", "description": "ETF", "shares": "1", "market_value": "100.00", "cost_basis": "90.00"}]
+    sync.run_sync(db, fetch=fetcher(brokerage(vti)), now=NOW)
+    no_key = brokerage(vti)
+    del no_key["accounts"][0]["holdings"]
+    sync.run_sync(db, fetch=fetcher(no_key), now=NOW + dt.timedelta(days=1))
+    assert count(db, Holding) == 1
+    acct = db.scalar(select(Account).where(Account.external_id == "sf-inv"))
+    acct.closed_at = NOW.date()
+    db.commit()
+    sync.run_sync(db, fetch=fetcher(brokerage([])), now=NOW + dt.timedelta(days=2))
+    assert count(db, Holding) == 1
+
+
+def test_malformed_holding_values_never_fail_the_sync(db):
+    from app.models import Holding
+    acct = brokerage([
+        {"id": "h1", "symbol": "VTI", "description": "ETF", "shares": "2", "market_value": "200.00", "cost_basis": "150.00"},
+        {"id": "h2", "symbol": "NANV", "description": "Bad value", "shares": "1", "market_value": "NaN"},
+        {"id": "h3", "symbol": "BADB", "description": "Bad basis", "shares": "1", "market_value": "50.00", "cost_basis": "abc"},
+        {"id": "h4", "symbol": "INFS", "description": "Bad shares", "shares": "Infinity", "market_value": "10.00"},
+        {"id": "h5", "symbol": "EMPT", "description": "Empty value", "shares": "1", "market_value": ""},
+    ])
+    acct["accounts"][0]["transactions"] = [{"id": "t9", "posted": epoch(2026, 10, 10), "amount": "-5.00", "description": "FEE"}]
+    run = sync.run_sync(db, fetch=fetcher(acct), now=NOW)
+    assert run.status == "success"
+    assert db.scalar(select(Transaction).where(Transaction.external_id == "t9")) is not None
+    rows = db.scalars(select(Holding).order_by(Holding.symbol)).all()
+    assert [(h.symbol, h.market_value_cents, h.cost_basis_cents) for h in rows] == [("BADB", 5000, None), ("VTI", 20000, 15000)]
+
+
+def test_backfill_pass_does_not_wipe_holdings(db):
+    from app.models import Holding
+    sync.run_sync(db, fetch=fetcher(payload(include_savings=False)), now=NOW)
+    now = NOW + dt.timedelta(days=1)
+    vti = {"id": "h1", "symbol": "VTI", "description": "ETF", "shares": "1", "market_value": "100.00", "cost_basis": "90.00"}
+    both = payload()
+    both["accounts"].append(brokerage([])["accounts"][0])  # a new account, so a backfill fetch happens
+    fetch = fetcher(both)
+
+    def with_holdings_only_in_recent_windows(start, end):
+        data = copy.deepcopy(fetch(start, end))
+        data["accounts"][-1]["holdings"] = [vti] if start >= now.date() - dt.timedelta(days=30) else []
+        return data
+
+    sync.run_sync(db, fetch=with_holdings_only_in_recent_windows, now=now)
+    assert any(start == now.date() - dt.timedelta(days=365) for start, _ in fetch.calls)  # the backfill ran
+    assert [h.symbol for h in db.scalars(select(Holding)).all()] == ["VTI"]
+
+
+def test_non_dict_and_out_of_range_holdings_are_skipped_and_commas_stripped(db):
+    from app.models import Holding
+    from app.routers.category_budgets import MAX_AMOUNT_CENTS
+    huge = f"{MAX_AMOUNT_CENTS // 100 + 1}.00"
+    acct = brokerage([
+        "VTI", None, 7,
+        {"id": "h1", "symbol": "VTI", "description": "ETF", "shares": "1,234.5", "market_value": "200.00", "cost_basis": "150.00"},
+        {"id": "h2", "symbol": "BIGV", "description": "Huge value", "shares": "1", "market_value": huge},
+        {"id": "h3", "symbol": "BIGN", "description": "Huge negative", "shares": "1", "market_value": f"-{huge}"},
+        {"id": "h4", "symbol": "BIGB", "description": "Huge basis", "shares": "1", "market_value": "10.00", "cost_basis": huge},
+        {"id": "h5", "symbol": "EDGE", "description": "At the limit", "shares": "1", "market_value": f"{MAX_AMOUNT_CENTS // 100}.00"},
+    ])
+    run = sync.run_sync(db, fetch=fetcher(acct), now=NOW)
+    assert run.status == "success"
+    rows = db.scalars(select(Holding).order_by(Holding.symbol)).all()
+    assert [(h.symbol, h.shares, h.market_value_cents) for h in rows] == [
+        ("EDGE", "1", MAX_AMOUNT_CENTS), ("VTI", "1234.5", 20000)]

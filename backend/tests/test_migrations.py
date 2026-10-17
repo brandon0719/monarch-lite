@@ -94,6 +94,18 @@ def _seed_populated(db_path):
     return groceries
 
 
+def _steps_down_to(revision):
+    """How many `downgrade -1` steps lead from head to `revision`, so new migrations don't break the walk."""
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    script = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
+    steps, rev = 0, script.get_current_head()
+    while rev != revision:
+        rev, steps = script.get_revision(rev).down_revision, steps + 1
+    return steps
+
+
 def _counts(db_path):
     with closing(sqlite3.connect(db_path)) as conn:
         counts = {t: conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in _CHILD_TABLES}
@@ -114,7 +126,7 @@ def test_populated_db_survives_upgrade_and_stepwise_downgrade(tmp_path):
     with closing(sqlite3.connect(db_path)) as conn:
         assert conn.execute("SELECT is_manual FROM accounts WHERE id=901").fetchone()[0] == 0
 
-    for _ in range(2):  # head -> ceb50a8ccf06 -> 5d0a2e97994b, one step at a time
+    for _ in range(_steps_down_to(_BEFORE_MANUAL)):  # one step at a time
         _alembic("downgrade", "-1", db_path=db_path)
         assert _counts(db_path) == before
     with closing(sqlite3.connect(db_path)) as conn:
