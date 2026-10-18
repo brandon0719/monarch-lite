@@ -37,7 +37,7 @@ class SyncInProgress(Exception):
 def window_start(db: Session, today: dt.date) -> dt.date:
     """Start early enough to cover the account that has gone longest without a good sync."""
     floor = today - dt.timedelta(days=FIRST_SYNC_DAYS)
-    accounts = db.scalars(select(Account).where(Account.closed_at.is_(None))).all()
+    accounts = db.scalars(select(Account).where(Account.closed_at.is_(None), Account.is_manual.is_(False))).all()
     if not accounts or any(a.last_synced_at is None for a in accounts):
         return floor
     oldest = min(min(a.last_synced_at.date() for a in accounts), today)  # never in the future
@@ -111,7 +111,7 @@ def _insert_new(db: Session, account: Account, acct: dict) -> list[Transaction]:
 def _mark_status(db: Session, balance_dates: dict[int, dt.date], errors: list[str], today: dt.date, now: dt.datetime) -> tuple[int, int]:
     detail = "; ".join(errors)
     ok = stale = 0
-    for account in db.scalars(select(Account).where(Account.closed_at.is_(None))):
+    for account in db.scalars(select(Account).where(Account.closed_at.is_(None), Account.is_manual.is_(False))):
         seen = balance_dates.get(account.id)
         if seen is not None and (today - seen).days <= STALE_AFTER_DAYS:
             account.last_synced_at, account.last_error = now, None

@@ -31,6 +31,7 @@ class Account(Base):
     name: Mapped[str]
     type: Mapped[str] = mapped_column(default="other")
     is_hidden: Mapped[bool] = mapped_column(default=False)
+    is_manual: Mapped[bool] = mapped_column(default=False)  # owner-entered balance; sync never touches it
     closed_at: Mapped[dt.date | None]
     last_synced_at: Mapped[dt.datetime | None]
     last_error: Mapped[str | None]
@@ -144,3 +145,69 @@ class BudgetSettings(Base):
     wants_pct: Mapped[int] = mapped_column(default=30)
     savings_pct: Mapped[int] = mapped_column(default=20)
     updated_at: Mapped[dt.datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+
+
+class RecurringItem(Base):
+    """An expected bill or income on a schedule (M3 round 1). amount_cents is signed: bills < 0, income > 0."""
+
+    __tablename__ = "recurring_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    merchant: Mapped[str]  # matches Transaction.merchant exactly
+    name: Mapped[str]
+    amount_cents: Mapped[int]
+    cadence: Mapped[str]  # weekly | monthly | yearly
+    anchor_date: Mapped[dt.date]
+    category_id: Mapped[int | None] = mapped_column(ForeignKey("categories.id", ondelete="SET NULL"))
+    created_at: Mapped[dt.datetime] = mapped_column(default=utcnow)
+
+
+class RecurringDismissal(Base):
+    """A merchant the owner dismissed, so it is never suggested again."""
+
+    __tablename__ = "recurring_dismissals"
+
+    merchant: Mapped[str] = mapped_column(primary_key=True)
+    dismissed_at: Mapped[dt.datetime] = mapped_column(default=utcnow)
+
+
+class Goal(Base):
+    """A savings goal (M3 round 2): progress from linked account balances or a manual contribution log."""
+
+    __tablename__ = "goals"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str]
+    target_cents: Mapped[int]
+    target_date: Mapped[dt.date | None]
+    kind: Mapped[str]  # linked | manual; fixed at creation
+    created_at: Mapped[dt.datetime] = mapped_column(default=utcnow)
+
+    links: Mapped[list["GoalAccount"]] = relationship(cascade="all, delete-orphan")
+    contributions: Mapped[list["GoalContribution"]] = relationship(
+        cascade="all, delete-orphan",
+        order_by=lambda: [GoalContribution.date.desc(), GoalContribution.id.desc()],
+    )
+
+
+class GoalAccount(Base):
+    """Links an account to a goal; an account belongs to at most one goal."""
+
+    __tablename__ = "goal_accounts"
+
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), primary_key=True)
+    goal_id: Mapped[int] = mapped_column(ForeignKey("goals.id", ondelete="CASCADE"), index=True)
+
+    account: Mapped[Account] = relationship()
+
+
+class GoalContribution(Base):
+    """A manual deposit (> 0) or withdrawal (< 0) toward a manual goal."""
+
+    __tablename__ = "goal_contributions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    goal_id: Mapped[int] = mapped_column(ForeignKey("goals.id", ondelete="CASCADE"), index=True)
+    date: Mapped[dt.date]
+    amount_cents: Mapped[int]
+    note: Mapped[str | None]

@@ -60,7 +60,7 @@ shoot_phone() {
   printf '<!doctype html><html><body style="margin:0;background:#888"><iframe src="%s" style="border:0;display:block;width:390px;height:844px;background:#fff"></iframe></body></html>' "$2" > "$TMP/wrap/$1.html"
   shoot "$1" 500,844 "http://127.0.0.1:$WRAP_PORT/$1.html"
 }
-for page in overview transactions spending accounts rules categories settings; do
+for page in overview transactions spending recurring goals accounts rules categories settings; do
   shoot "$page-light" 1440,1000 "http://127.0.0.1:$PORT/?theme=light#/$page"
   shoot "$page-dark" 1440,1000 "http://127.0.0.1:$PORT/?theme=dark#/$page"
   shoot_phone "$page-phone" "http://127.0.0.1:$PORT/?theme=light#/$page"

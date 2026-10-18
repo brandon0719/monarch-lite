@@ -10,6 +10,7 @@ from ..db import get_db
 from ..models import Category
 from ..services import category_budgets as svc
 from ..services.overview import SPENDING_BUCKETS, month_range
+from .params import Id
 
 router = APIRouter(prefix="/api/category-budgets", tags=["category-budgets"])
 MAX_AMOUNT_CENTS = 100_000_000_00  # $100M
@@ -68,7 +69,7 @@ def get_category_budgets(month: str | None = Query(None, pattern=MONTH), db: Ses
 
 
 @router.put("/{category_id}", response_model=BudgetSet)
-def put_category_budget(category_id: int, body: BudgetIn, db: Session = Depends(get_db)):
+def put_category_budget(category_id: Id, body: BudgetIn, db: Session = Depends(get_db)):
     category = db.get(Category, category_id)
     if category is None:
         raise HTTPException(404, "Category not found")

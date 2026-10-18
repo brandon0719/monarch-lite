@@ -9,6 +9,7 @@ from ..db import get_db
 from ..models import BudgetSettings
 from ..services import budget as svc
 from ..services import overview as ov
+from .category_budgets import MAX_AMOUNT_CENTS
 
 router = APIRouter(prefix="/api", tags=["budget"])
 
@@ -23,7 +24,7 @@ class SettingsOut(BaseModel):
 
 
 class SettingsIn(BaseModel):
-    take_home_cents: int = Field(gt=0)
+    take_home_cents: int = Field(gt=0, le=MAX_AMOUNT_CENTS)
     needs_pct: int = Field(ge=0, le=100)
     wants_pct: int = Field(ge=0, le=100)
     savings_pct: int = Field(ge=0, le=100)

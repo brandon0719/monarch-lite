@@ -267,3 +267,13 @@ def test_backfill_is_fetched_before_anything_is_written(db):
     assert len(seen) > 1 and any(start == now.date() - dt.timedelta(days=365) for start, _ in inner.calls)
     assert all(pending is False and rows == baseline for pending, rows in seen)
     assert db.scalar(select(Transaction).where(Transaction.external_id == "old")) is not None
+
+
+def test_manual_accounts_never_widen_the_window_or_go_stale(db):
+    today = dt.date(2026, 10, 16)
+    make_account(db, last_synced_at=dt.datetime(2026, 10, 15, 9))
+    manual = make_account(db, name="Online Savings", type="savings", is_manual=True, last_synced_at=None)
+    assert sync.window_start(db, today) == dt.date(2026, 10, 8)  # synced account - 7, manual ignored
+    sync.run_sync(db, fetch=fetcher(payload()), now=NOW)
+    db.refresh(manual)
+    assert manual.last_error is None and manual.last_synced_at is None

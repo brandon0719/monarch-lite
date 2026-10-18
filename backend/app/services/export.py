@@ -7,7 +7,11 @@ import zipfile
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-TABLES = ("accounts", "balance_snapshots", "transactions", "tags", "transaction_tags", "categories", "rules", "sync_runs")
+TABLES = (
+    "accounts", "balance_snapshots", "transactions", "tags", "transaction_tags", "categories", "rules", "sync_runs",
+    "budget_settings", "category_budgets", "recurring_items", "recurring_dismissals",
+    "goals", "goal_accounts", "goal_contributions",
+)
 
 
 def export_zip(db: Session) -> bytes:

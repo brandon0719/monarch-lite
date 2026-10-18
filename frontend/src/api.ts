@@ -8,6 +8,7 @@ export interface Account {
   institution: string
   name: string
   type: AccountType
+  is_manual: boolean
   is_hidden: boolean
   closed_at: string | null
   last_synced_at: string | null
@@ -15,6 +16,7 @@ export interface Account {
   balance_cents: number | null
   balance_date: string | null
 }
+export interface ManualAccountInput { name: string; type: AccountType; balance_cents: number; as_of?: string }
 export type AccountPatch = Partial<Pick<Account, 'name' | 'type' | 'is_hidden' | 'closed_at'>>
 export interface Tag { id: number; name: string }
 export interface Txn {
@@ -121,6 +123,30 @@ function describe(detail: unknown, fallback: string): string {
   return detail ? JSON.stringify(detail) : fallback
 }
 
+export type Cadence = 'weekly' | 'monthly' | 'yearly'
+export interface RecurringItem {
+  id: number; merchant: string; name: string; amount_cents: number; cadence: Cadence; anchor_date: string
+  category_id: number | null; next_due: string; status: 'upcoming' | 'late'; last_amount_cents: number | null; last_date: string | null
+}
+export interface RecurringSuggestion { merchant: string; cadence: Cadence; amount_cents: number; count: number; last_date: string; next_date: string }
+export type RecurringAlert =
+  | { kind: 'price_increase'; item_id: number; name: string; previous_cents: number; latest_cents: number; date: string }
+  | { kind: 'new_recurring'; merchant: string; amount_cents: number; cadence: Cadence }
+export interface Recurring { items: RecurringItem[]; suggestions: RecurringSuggestion[]; alerts: RecurringAlert[] }
+export interface RecurringInput { merchant: string; name: string; amount_cents: number; cadence: Cadence; anchor_date: string; category_id: number | null }
+export interface UpcomingRow { date: string; item_id: number; name: string; amount_cents: number; balance_cents: number | null; late: boolean }
+export interface Upcoming { start_balance_cents: number | null; rows: UpcomingRow[]; bills_cents: number; income_cents: number }
+
+export type GoalStatus = 'done' | 'no_date' | 'unknown' | 'on_track' | 'behind'
+export interface Goal {
+  id: number; name: string; kind: 'linked' | 'manual'; target_cents: number; target_date: string | null
+  current_cents: number; pct: number; rate_cents: number | null; history_days: number | null; needed_cents: number | null
+  status: GoalStatus; reach_by: string | null
+  accounts: { id: number; name: string }[]
+  contributions: { id: number; date: string; amount_cents: number; note: string | null }[]
+}
+export interface GoalInput { name: string; target_cents: number; target_date: string | null; kind: 'linked' | 'manual'; account_ids: number[] }
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...init?.headers } })
   if (!res.ok) {
@@ -143,6 +169,9 @@ function query(params: object): string {
 export const api = {
   accounts: () => request<Account[]>('/accounts'),
   patchAccount: (id: number, body: AccountPatch) => request<Account>(`/accounts/${id}`, send('PATCH', body)),
+  createManualAccount: (body: ManualAccountInput) => request<Account>('/accounts', send('POST', body)),
+  updateBalance: (id: number, body: { balance_cents: number; as_of?: string }) => request<Account>(`/accounts/${id}/balance`, send('POST', body)),
+  deleteAccount: (id: number) => request<void>(`/accounts/${id}`, send('DELETE')),
   sync: () => request<SyncRun>('/sync', send('POST')),
   syncRuns: () => request<SyncRun[]>('/sync/runs?limit=20'),
   transactions: (filters: TxnFilters, cursor?: string) => request<TxnPage>(`/transactions?${query({ ...filters, cursor })}`),
@@ -159,6 +188,13 @@ export const api = {
   deleteRule: (id: number) => request<void>(`/rules/${id}`, send('DELETE')),
   reorderRules: (ids: number[]) => request<Rule[]>('/rules/reorder', send('POST', { ids })),
   applyRules: (dryRun: boolean) => request<{ changed: number }>(`/rules/apply?dry_run=${dryRun}`, send('POST')),
+  recurring: () => request<Recurring>('/recurring'),
+  upcoming: (days: number) => request<Upcoming>(`/recurring/upcoming?days=${days}`),
+  createRecurring: (body: RecurringInput) => request<RecurringItem>('/recurring/items', send('POST', body)),
+  patchRecurring: (id: number, body: Partial<RecurringInput>) => request<RecurringItem>(`/recurring/items/${id}`, send('PATCH', body)),
+  deleteRecurring: (id: number) => request<void>(`/recurring/items/${id}`, send('DELETE')),
+  confirmSuggestion: (merchant: string) => request<RecurringItem>('/recurring/suggestions/confirm', send('POST', { merchant })),
+  dismissSuggestion: (merchant: string) => request<void>('/recurring/suggestions/dismiss', send('POST', { merchant })),
   overview: (month?: string) => request<Overview>(`/overview${month ? `?month=${month}` : ''}`),
   budgetSettings: () => request<BudgetSettings>('/budget/settings'),
   saveBudgetSettings: (body: BudgetSettingsInput) => request<BudgetSettings>('/budget/settings', send('PUT', body)),
@@ -168,5 +204,11 @@ export const api = {
   categoryBudgets: (month: string) => request<CategoryBudgets>(`/category-budgets?month=${month}`),
   setCategoryBudget: (categoryId: number, month: string, amount_cents: number | null) =>
     request<{ category_id: number; month: string; amount_cents: number | null }>(`/category-budgets/${categoryId}`, send('PUT', { month, amount_cents })),
+  goals: () => request<Goal[]>('/goals'),
+  createGoal: (body: GoalInput) => request<Goal>('/goals', send('POST', body)),
+  patchGoal: (id: number, body: Partial<Omit<GoalInput, 'kind'>>) => request<Goal>(`/goals/${id}`, send('PATCH', body)),
+  deleteGoal: (id: number) => request<void>(`/goals/${id}`, send('DELETE')),
+  addContribution: (id: number, body: { date: string; amount_cents: number; note?: string }) => request<Goal>(`/goals/${id}/contributions`, send('POST', body)),
+  deleteContribution: (id: number, cid: number) => request<void>(`/goals/${id}/contributions/${cid}`, send('DELETE')),
   backup: () => request<{ path: string }>('/backups', send('POST')),
 }
