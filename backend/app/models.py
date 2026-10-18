@@ -211,3 +211,44 @@ class GoalContribution(Base):
     date: Mapped[dt.date]
     amount_cents: Mapped[int]
     note: Mapped[str | None]
+
+
+class Holding(Base):
+    """An investment position as SimpleFIN last reported it (M4); an account's set is replaced on every sync."""
+
+    __tablename__ = "holdings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), index=True)
+    symbol: Mapped[str]
+    description: Mapped[str]
+    shares: Mapped[str]  # exact decimal text from SimpleFIN
+    market_value_cents: Mapped[int]
+    cost_basis_cents: Mapped[int | None]  # None when SimpleFIN reports 0 (unknown)
+    as_of: Mapped[dt.date]
+
+    account: Mapped[Account] = relationship()
+
+
+class AssetClass(Base):
+    """Owner's override of a symbol's asset class (M4); symbols without a row use the default."""
+
+    __tablename__ = "asset_classes"
+
+    symbol: Mapped[str] = mapped_column(primary_key=True)
+    asset_class: Mapped[str]  # stocks | bonds | cash
+
+
+DEFAULT_THRESHOLD = 5  # allocation drift alert, in percentage points
+
+
+class AllocationTargets(Base):
+    """Single row (id=1): target split across asset classes and the drift alert threshold (M4)."""
+
+    __tablename__ = "allocation_targets"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    stocks_pct: Mapped[int]
+    bonds_pct: Mapped[int]
+    cash_pct: Mapped[int]
+    drift_threshold: Mapped[int] = mapped_column(default=DEFAULT_THRESHOLD)

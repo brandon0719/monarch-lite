@@ -3,7 +3,8 @@
 # Screenshots every page (light, dark, phone) from a throwaway server on :8001 that runs on a
 # backup-API copy of the real DB with an empty SimpleFIN token (no network). Phone shots go through a
 # static iframe wrapper served on :8002 from its own folder (never the folder holding the DB copy).
-# The real app on :8000 is untouched.
+# The frontend is built into a temp dir and served from there via FRONTEND_DIST, so frontend/dist (served by
+# the real app) is never touched. The real app on :8000 is untouched.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${1:?usage: ops/screenshots.sh OUT_DIR}"
@@ -25,11 +26,12 @@ for p in "$PORT" "$WRAP_PORT"; do
   fi
 done
 mkdir -p "$OUT"
+(cd "$ROOT/frontend" && npx vite build --outDir "$TMP/dist" --emptyOutDir >"$TMP/build.log" 2>&1) || { cat "$TMP/build.log" >&2; exit 1; }
 "$ROOT/.venv/bin/python" -c 'import sqlite3, sys; s = sqlite3.connect(sys.argv[1]); d = sqlite3.connect(sys.argv[2]); s.backup(d); d.close(); s.close()' \
   "$ROOT/backend/monarch-lite.db" "$TMP/shots.db"
 # Bring the copy up to the current schema so pages for newer migrations render (the real DB is untouched).
 (cd "$ROOT/backend" && DB_PATH="$TMP/shots.db" ../.venv/bin/alembic upgrade head >"$TMP/migrate.log" 2>&1) || { cat "$TMP/migrate.log" >&2; exit 1; }
-(cd "$ROOT/backend" && exec env SIMPLEFIN_TOKEN= DB_PATH="$TMP/shots.db" BACKUP_DIR="$TMP/backups" \
+(cd "$ROOT/backend" && exec env SIMPLEFIN_TOKEN= FRONTEND_DIST="$TMP/dist" DB_PATH="$TMP/shots.db" BACKUP_DIR="$TMP/backups" \
   ../.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port "$PORT" >"$TMP/server.log" 2>&1) &
 SERVER=$!
 READY=""
@@ -60,7 +62,7 @@ shoot_phone() {
   printf '<!doctype html><html><body style="margin:0;background:#888"><iframe src="%s" style="border:0;display:block;width:390px;height:844px;background:#fff"></iframe></body></html>' "$2" > "$TMP/wrap/$1.html"
   shoot "$1" 500,844 "http://127.0.0.1:$WRAP_PORT/$1.html"
 }
-for page in overview transactions spending recurring goals accounts rules categories settings; do
+for page in overview transactions spending recurring goals accounts networth rules categories settings; do
   shoot "$page-light" 1440,1000 "http://127.0.0.1:$PORT/?theme=light#/$page"
   shoot "$page-dark" 1440,1000 "http://127.0.0.1:$PORT/?theme=dark#/$page"
   shoot_phone "$page-phone" "http://127.0.0.1:$PORT/?theme=light#/$page"

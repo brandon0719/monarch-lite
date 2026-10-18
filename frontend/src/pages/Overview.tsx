@@ -88,6 +88,7 @@ export default function Overview() {
           <div className="tile-label">Net worth</div>
           <div className="tile-value">{formatCents(o.net_worth_cents)}</div>
           <div className="tile-sub">{o.last_synced_at ? `as of ${formatDateTime(o.last_synced_at)}` : 'Not synced yet'}</div>
+          <Link className="tile-link" to="/networth">See history →</Link>
         </div>
         <div className="tile">
           <div className="tile-label">Spent in {month}</div>

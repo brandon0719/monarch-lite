@@ -147,6 +147,21 @@ export interface Goal {
 }
 export interface GoalInput { name: string; target_cents: number; target_date: string | null; kind: 'linked' | 'manual'; account_ids: number[] }
 
+export interface NetWorthPoint { date: string; assets_cents: number; liabilities_cents: number; net_cents: number; estimated: boolean }
+export interface NetWorth { points: NetWorthPoint[]; change_cents: number; first_actual_date: string | null }
+export type NetWorthRange = '1M' | '3M' | 'YTD' | '1Y' | 'ALL'
+export type AssetClassName = 'stocks' | 'bonds' | 'cash'
+/** `shares` is exact decimal text. Price, basis and gain are null when unknown; `gain_pct` is a fraction (0.1234 = 12.34%). */
+export interface Holding {
+  id: number; account_id: number; account_name: string; symbol: string; description: string; shares: string
+  price_cents: number | null; market_value_cents: number; cost_basis_cents: number | null
+  gain_cents: number | null; gain_pct: number | null; asset_class: AssetClassName; as_of: string
+}
+export interface AllocationClass { asset_class: AssetClassName; value_cents: number; pct: number; target_pct: number | null; drift_pts: number | null; over: boolean }
+export interface Allocation { configured: boolean; drift_threshold: number; total_cents: number; classes: AllocationClass[] }
+export interface AllocationTargets { configured: boolean; stocks_pct: number | null; bonds_pct: number | null; cash_pct: number | null; drift_threshold: number }
+export interface AllocationTargetsInput { stocks_pct: number; bonds_pct: number; cash_pct: number; drift_threshold: number }
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...init?.headers } })
   if (!res.ok) {
@@ -210,5 +225,12 @@ export const api = {
   deleteGoal: (id: number) => request<void>(`/goals/${id}`, send('DELETE')),
   addContribution: (id: number, body: { date: string; amount_cents: number; note?: string }) => request<Goal>(`/goals/${id}/contributions`, send('POST', body)),
   deleteContribution: (id: number, cid: number) => request<void>(`/goals/${id}/contributions/${cid}`, send('DELETE')),
+  networth: (range: NetWorthRange) => request<NetWorth>(`/networth?range=${range}`),
+  holdings: () => request<Holding[]>('/holdings'),
+  setAssetClass: (symbol: string, asset_class: AssetClassName) =>
+    request<{ symbol: string; asset_class: AssetClassName }>(`/holdings/classes/${encodeURIComponent(symbol)}`, send('PUT', { asset_class })),
+  allocation: () => request<Allocation>('/allocation'),
+  allocationTargets: () => request<AllocationTargets>('/allocation/targets'),
+  saveAllocationTargets: (body: AllocationTargetsInput) => request<AllocationTargets>('/allocation/targets', send('PUT', body)),
   backup: () => request<{ path: string }>('/backups', send('POST')),
 }
