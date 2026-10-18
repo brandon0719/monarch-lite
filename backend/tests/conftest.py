@@ -13,6 +13,31 @@ from app.models import Account, Category, Transaction
 from app.seed import seed_defaults
 
 
+@pytest.fixture(autouse=True)
+def _no_network_prices(monkeypatch, request):
+    """config loads the real .env; tests must never call Finnhub.
+
+    The blocked stub records every symbol it is asked for and the test FAILS at teardown if any got through,
+    unless it opts in with @pytest.mark.allow_blocked_fetch (get_price swallows the stub's error otherwise)."""
+    from app import config
+    from app.services import prices
+
+    monkeypatch.setattr(config, "FINNHUB_API_KEY", "")
+
+    reached = []  # symbols that hit the blocked fetch, so an accidental call is visible
+
+    def blocked(symbol):
+        reached.append(symbol)
+        raise AssertionError("tests must not fetch real prices")
+
+    monkeypatch.setattr(prices, "finnhub_quote", blocked)
+    prices.clear_failures()
+    yield reached
+    prices.clear_failures()
+    if reached and request.node.get_closest_marker("allow_blocked_fetch") is None:
+        pytest.fail(f"test reached the blocked Finnhub fetch for {reached}; inject a fetch or mark allow_blocked_fetch")
+
+
 @pytest.fixture
 def db():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)

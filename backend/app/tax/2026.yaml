@@ -1,0 +1,18 @@
+# 2026 federal and Washington payroll figures. VERIFY against the IRS (Rev. Proc. for 2026,
+# Pub 15-T) and your pay stub; editing this file needs no code change.
+# Money is in cents; rate_pct is a whole percent; *_bp are basis points (0.01%).
+year: 2026
+federal:
+  standard_deduction: {single: 1610000, married_jointly: 3220000}
+  brackets:
+    single: [[0, 10], [1240000, 12], [5040000, 22], [10570000, 24], [20177500, 32], [25622500, 35], [64060000, 37]]
+    married_jointly: [[0, 10], [2480000, 12], [10080000, 22], [21140000, 24], [40355000, 32], [51245000, 35], [76870000, 37]]
+  supplemental: {rate_pct: 22, high_rate_pct: 37, high_threshold: 100000000}
+fica:
+  social_security: {rate_bp: 620, wage_base: 18450000}
+  medicare: {rate_bp: 145, additional_bp: 90, additional_threshold: 20000000}
+state:
+  name: WA
+  payroll:
+    - {name: WA Cares, rate_bp: 58}
+    - {name: WA PFML (employee share), rate_bp: 0}  # enter the rate from your pay stub

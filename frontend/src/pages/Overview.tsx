@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { api, type Category, type SpendingRow } from '../api'
 import CategoryChip from '../components/CategoryChip'
+import UnvestedLine from '../components/UnvestedLine'
 import { categoryColor, NEUTRAL } from '../colors'
 import { formatCents, formatDate, formatDateTime, monthLabel } from '../format'
 
@@ -55,6 +56,21 @@ function UpcomingCard() {
   )
 }
 
+/** Shown only when this year's estimate says to set money aside; silent while loading or on error. */
+function TaxAlertCard() {
+  const year = new Date().getFullYear()
+  const est = useQuery({ queryKey: ['income', 'tax-estimate', year], queryFn: () => api.taxEstimate(year) })
+  if (!est.data?.alert) return null
+  const owed = formatCents(est.data.balance_cents)
+  return (
+    <section className="card ov-alert" aria-labelledby="ov-tax" role="status">
+      <h2 className="card-title" id="ov-tax">Tax set-aside</h2>
+      <p>Projected {est.data.year} under-withholding {owed}. Consider setting aside {owed}.</p>
+      <Link className="tile-link" to="/income">See estimate →</Link>
+    </section>
+  )
+}
+
 export default function Overview() {
   const overview = useQuery({ queryKey: ['overview'], queryFn: () => api.overview() })
   const categories = useQuery({ queryKey: ['categories'], queryFn: api.categories })
@@ -87,6 +103,7 @@ export default function Overview() {
         <div className="tile">
           <div className="tile-label">Net worth</div>
           <div className="tile-value">{formatCents(o.net_worth_cents)}</div>
+          <UnvestedLine />
           <div className="tile-sub">{o.last_synced_at ? `as of ${formatDateTime(o.last_synced_at)}` : 'Not synced yet'}</div>
           <Link className="tile-link" to="/networth">See history →</Link>
         </div>
@@ -127,6 +144,7 @@ export default function Overview() {
         </section>
 
         <div className="ov-side">
+          <TaxAlertCard />
           <UpcomingCard />
 
           <section className="card" aria-labelledby="ov-balances">

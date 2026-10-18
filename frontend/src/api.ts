@@ -162,11 +162,77 @@ export interface Allocation { configured: boolean; drift_threshold: number; tota
 export interface AllocationTargets { configured: boolean; stocks_pct: number | null; bonds_pct: number | null; cash_pct: number | null; drift_threshold: number }
 export interface AllocationTargetsInput { stocks_pct: number; bonds_pct: number; cash_pct: number; drift_threshold: number }
 
+export type RsuSchedule = 'amazon_5_15_40_40' | 'semiannual' | 'custom'
+export interface RsuVest { id: number; vest_date: string; shares: number; vested: boolean; value_cents: number | null }
+export interface RsuGrant {
+  id: number; label: string; external_id: string | null; symbol: string; grant_date: string; start_date: string
+  total_shares: number; schedule: RsuSchedule; vested_shares: number; unvested_shares: number
+  unvested_value_cents: number | null; vests: RsuVest[]
+}
+/** `as_of` is naive UTC; `source` is 'finnhub' or 'holding'. */
+export interface RsuPrice { symbol: string; price_cents: number; as_of: string; source: string }
+export interface RsuNextVest { vest_date: string; shares: number; value_cents: number | null; grant_label: string }
+export interface Rsu {
+  price: RsuPrice | null
+  grants: RsuGrant[]
+  totals: { unvested_shares: number; unvested_value_cents: number | null; vested_shares: number; next_vest: RsuNextVest | null }
+}
+export interface RsuVestInput { vest_date: string; shares: number }
+export interface RsuGrantInput {
+  label: string; external_id?: string | null; symbol?: string; grant_date: string; start_date: string; total_shares: number
+  schedule: RsuSchedule; first_vest?: string; count?: number; vests?: RsuVestInput[]
+}
+
+export type FilingStatus = 'single' | 'married_jointly'
+export interface IncomeProfile {
+  id: number; effective_from: string; salary_cents: number; pay_frequency: 'monthly'; k401_pct: number
+  filing_status: FilingStatus; extra_withholding_cents: number; employment_start: string
+}
+export type IncomeProfileInput = Omit<IncomeProfile, 'id' | 'pay_frequency'> & { pay_frequency?: 'monthly' }
+export interface PaycheckRow { date: string; kind: 'regular' | 'payment'; label: string; gross_cents: number; lines: { name: string; cents: number }[]; net_cents: number }
+export interface PaycheckMonth { month: string; modeled_net_cents: number; actual_cents: number }
+export interface Paychecks { year: number; paychecks: PaycheckRow[]; months: PaycheckMonth[]; monthly_take_home_cents: number | null; tax_year_used: number; tax_year_fallback: boolean }
+export interface EstimateVest { vest_date: string; grant_label: string; shares: number; value_cents: number | null; withheld_cents: number | null; shortfall_cents: number | null }
+export interface TaxEstimate {
+  year: number; tax_year_used: number; tax_year_fallback: boolean; has_profile: boolean; filing_status: FilingStatus
+  wages_cents: number; pretax_cents: number; vest_income_cents: number; taxable_cents: number; liability_cents: number
+  withheld_salary_cents: number; withheld_supplemental_cents: number; withheld_vests_cents: number; withheld_cents: number
+  balance_cents: number; marginal_pct: number; threshold_cents: number; alert: boolean; missing_price: boolean; vests: EstimateVest[]
+}
+export interface CompYear { year: number; salary_cents: number; cash_cents: number; rsu_shares: number; rsu_cents: number | null; total_cents: number | null }
+export interface CompProjection { growth_pct: number; price: { symbol: string; price_cents: number } | null; years: CompYear[] }
+export type PaymentKind = 'lump' | 'installments'
+export interface CashPayment {
+  id: number; label: string; kind: PaymentKind; amount_cents: number
+  paid_date: string | null; start_date: string | null; end_date: string | null; repay_start: string | null; repay_end: string | null
+}
+/** The other kind's dates must be sent as explicit nulls, or a kind switch through PATCH keeps the old ones. */
+export type CashPaymentInput = Omit<CashPayment, 'id'>
+export interface Clawback { items: { payment_id: number; label: string; owed_today_cents: number; zero_date: string }[]; total_cents: number }
+/** The loaded tax YAML, as JSON. Money is cents, `rate_pct` a whole percent, `*_bp` basis points. */
+export interface TaxConfig {
+  year: number
+  federal: {
+    standard_deduction: Record<FilingStatus, number>
+    brackets: Record<FilingStatus, [number, number][]>
+    supplemental: { rate_pct: number; high_rate_pct: number; high_threshold: number }
+  }
+  fica: {
+    social_security: { rate_bp: number; wage_base: number }
+    medicare: { rate_bp: number; additional_bp: number; additional_threshold: number }
+  }
+  state: { name: string; payroll: { name: string; rate_bp: number }[] }
+}
+
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) { super(message) }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...init?.headers } })
   if (!res.ok) {
     const body = await res.json().catch(() => null)
-    throw new Error(describe(body?.detail, `${res.status} ${res.statusText}`))
+    throw new ApiError(describe(body?.detail, `${res.status} ${res.statusText}`), res.status)
   }
   return (res.status === 204 ? undefined : await res.json()) as T
 }
@@ -232,5 +298,22 @@ export const api = {
   allocation: () => request<Allocation>('/allocation'),
   allocationTargets: () => request<AllocationTargets>('/allocation/targets'),
   saveAllocationTargets: (body: AllocationTargetsInput) => request<AllocationTargets>('/allocation/targets', send('PUT', body)),
+  rsu: () => request<Rsu>('/rsu'),
+  createGrant: (body: RsuGrantInput) => request<RsuGrant>('/rsu/grants', send('POST', body)),
+  patchGrant: (id: number, body: { label?: string; external_id?: string | null }) => request<RsuGrant>(`/rsu/grants/${id}`, send('PATCH', body)),
+  replaceVests: (id: number, vests: RsuVestInput[]) => request<RsuGrant>(`/rsu/grants/${id}/vests`, send('PUT', { vests })),
+  deleteGrant: (id: number) => request<void>(`/rsu/grants/${id}`, send('DELETE')),
+  incomeProfiles: () => request<IncomeProfile[]>('/income/profiles'),
+  saveIncomeProfile: (body: IncomeProfileInput) => request<IncomeProfile>('/income/profiles', send('PUT', body)),
+  deleteIncomeProfile: (id: number) => request<void>(`/income/profiles/${id}`, send('DELETE')),
+  taxConfig: (year: number) => request<TaxConfig>(`/income/tax-config?year=${year}`),
+  paychecks: (year: number) => request<Paychecks>(`/income/paychecks?year=${year}`),
+  taxEstimate: (year: number) => request<TaxEstimate>(`/income/tax-estimate?year=${year}`),
+  compProjection: (growthPct: number) => request<CompProjection>(`/income/comp-projection?growth_pct=${growthPct}`),
+  payments: () => request<CashPayment[]>('/income/payments'),
+  createPayment: (body: CashPaymentInput) => request<CashPayment>('/income/payments', send('POST', body)),
+  patchPayment: (id: number, body: CashPaymentInput) => request<CashPayment>(`/income/payments/${id}`, send('PATCH', body)),
+  deletePayment: (id: number) => request<void>(`/income/payments/${id}`, send('DELETE')),
+  clawback: () => request<Clawback>('/income/clawback'),
   backup: () => request<{ path: string }>('/backups', send('POST')),
 }

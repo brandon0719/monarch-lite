@@ -15,10 +15,12 @@ from .routers import (
     category_budgets,
     data,
     goals,
+    income,
     investments,
     networth,
     overview,
     recurring,
+    rsu,
     rules,
     sync,
     transactions,
@@ -44,7 +46,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="monarch-lite", lifespan=lifespan)
 # Blocks DNS rebinding: a hostile page can resolve its own name to 127.0.0.1, but its Host header stays foreign.
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"])
-for module in (accounts, sync, transactions, categories, rules, data, overview, budget, category_budgets, recurring, goals, investments, networth):
+for module in (accounts, sync, transactions, categories, rules, data, overview, budget, category_budgets, recurring, goals, investments, networth, rsu, income):
     app.include_router(module.router)
 
 
