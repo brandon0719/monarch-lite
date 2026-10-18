@@ -3,6 +3,7 @@ import { useState, type CSSProperties } from 'react'
 import { Link } from 'react-router-dom'
 import { api, type AllocationClass, type AssetClassName, type Holding, type NetWorthPoint, type NetWorthRange } from '../api'
 import NetWorthChart from '../components/NetWorthChart'
+import UnvestedLine from '../components/UnvestedLine'
 import { formatCents, formatDate } from '../format'
 
 const RANGES: [NetWorthRange, string][] = [['1M', '1M'], ['3M', '3M'], ['YTD', 'YTD'], ['1Y', '1Y'], ['ALL', 'All']]
@@ -47,8 +48,10 @@ function HistoryCard() {
               <strong className="nw-total">{formatCents(last.net_cents)}</strong>
               <span className={`nw-change ${tone(nw.data.change_cents) ?? ''}`}>{signed(nw.data.change_cents)}</span>
               <span className="muted"> since {formatDate(first.date)}</span>
+              <UnvestedLine />
             </p>
           )}
+          {!(last && first) && <UnvestedLine />}
           <NetWorthChart points={points} />
           {note && <p className="muted sp-note">Dashed line: estimated before {formatDate(note)} (cash rebuilt from transactions; investments held at their first known value)</p>}
           {points.length > 0 && (

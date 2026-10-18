@@ -92,3 +92,34 @@ def test_startup_marks_interrupted_runs_before_scheduler_starts(db, monkeypatch)
     with TestClient(main.app):
         pass
     assert order == ["failed"]
+
+
+def test_scheduler_refreshes_grant_prices_and_survives_errors(db, monkeypatch):
+    from app.models import RsuGrant
+    from app.services import prices
+    calls = []
+    monkeypatch.setattr(prices, "get_price", lambda db_, symbol, now=None, fetch=None: calls.append(symbol) or (_ for _ in ()).throw(RuntimeError("down")))
+    db.add(RsuGrant(label="Grant", symbol="VTI", grant_date=dt.date(2025, 3, 1), start_date=dt.date(2025, 3, 20),
+                    total_shares=400, schedule="amazon_5_15_40_40"))
+    db.commit()
+    prices.refresh_all(db, dt.datetime(2026, 10, 17, 12))  # must not raise
+    assert calls == ["VTI"]
+
+
+def test_run_due_jobs_calls_refresh_all_and_survives_its_failure(db, tmp_path, monkeypatch):
+    from app.services import prices
+
+    monkeypatch.setattr(simplefin, "fetch_accounts", lambda start, end: {"errors": [], "accounts": []})
+    live = tmp_path / "live.db"
+    sqlite3.connect(live).close()
+    monkeypatch.setattr(config, "DB_PATH", live)
+    monkeypatch.setattr(config, "BACKUP_DIR", tmp_path / "backups")
+    calls = []
+
+    def boom(db_, now):
+        calls.append(now)
+        raise RuntimeError("prices down")
+
+    monkeypatch.setattr(prices, "refresh_all", boom)
+    assert run_due_jobs(db, NOW, NOW) == ["sync", "backup"]
+    assert calls == [NOW]

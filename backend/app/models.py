@@ -252,3 +252,74 @@ class AllocationTargets(Base):
     bonds_pct: Mapped[int]
     cash_pct: Mapped[int]
     drift_threshold: Mapped[int] = mapped_column(default=DEFAULT_THRESHOLD)
+
+
+class RsuGrant(Base):
+    """An RSU award (M5): vests are generated from `schedule` (or entered, for custom)."""
+
+    __tablename__ = "rsu_grants"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    label: Mapped[str]
+    external_id: Mapped[str | None]  # plan provider's grant id
+    symbol: Mapped[str] = mapped_column(default="AMZN")
+    grant_date: Mapped[dt.date]
+    start_date: Mapped[dt.date]  # employment start; anchors preset schedules
+    total_shares: Mapped[int]
+    schedule: Mapped[str]  # amazon_5_15_40_40 | semiannual | custom
+    created_at: Mapped[dt.datetime] = mapped_column(default=utcnow)
+
+    vests: Mapped[list["RsuVest"]] = relationship(cascade="all, delete-orphan", order_by=lambda: RsuVest.vest_date)
+
+
+class RsuVest(Base):
+    __tablename__ = "rsu_vests"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    grant_id: Mapped[int] = mapped_column(ForeignKey("rsu_grants.id", ondelete="CASCADE"), index=True)
+    vest_date: Mapped[dt.date]
+    shares: Mapped[int]
+
+
+class Price(Base):
+    """Latest known price per symbol (M5): Finnhub quotes, cached for an hour."""
+
+    __tablename__ = "prices"
+
+    symbol: Mapped[str] = mapped_column(primary_key=True)
+    price_cents: Mapped[int]
+    as_of: Mapped[dt.datetime]  # naive UTC
+    source: Mapped[str]  # finnhub
+
+
+class IncomeProfile(Base):
+    """Salary terms from `effective_from` on (M5 R2); the profile in effect on a day is the latest one on or before it."""
+
+    __tablename__ = "income_profiles"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    effective_from: Mapped[dt.date] = mapped_column(unique=True)
+    salary_cents: Mapped[int]
+    pay_frequency: Mapped[str] = mapped_column(default="monthly")
+    k401_pct: Mapped[int]
+    filing_status: Mapped[str]  # single | married_jointly
+    extra_withholding_cents: Mapped[int] = mapped_column(default=0)
+    employment_start: Mapped[dt.date]
+    created_at: Mapped[dt.datetime] = mapped_column(default=utcnow)
+
+
+class CashPayment(Base):
+    """A sign-on or bonus payment, lump or installments, with an optional clawback repay window (M5 R2)."""
+
+    __tablename__ = "cash_payments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    label: Mapped[str]
+    kind: Mapped[str]  # lump | installments
+    amount_cents: Mapped[int]
+    paid_date: Mapped[dt.date | None]  # lump
+    start_date: Mapped[dt.date | None]  # installments, inclusive
+    end_date: Mapped[dt.date | None]  # installments, exclusive
+    repay_start: Mapped[dt.date | None]
+    repay_end: Mapped[dt.date | None]
+    created_at: Mapped[dt.datetime] = mapped_column(default=utcnow)

@@ -9,7 +9,7 @@ Runs always-on at **http://127.0.0.1:8000**. It syncs SimpleFIN daily and backs 
 1. `.env` in the repo root (never committed):
    ```
    SIMPLEFIN_TOKEN=<your SimpleFIN access URL>
-   FINNHUB_API_KEY=<your Finnhub key>   # used from M4
+   FINNHUB_API_KEY=<your Finnhub key>   # used from M5 (AMZN price)
    # BACKUP_DIR=~/monarch-lite-backups   (optional)
    ```
 2. Backend:

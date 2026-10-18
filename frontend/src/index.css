@@ -542,3 +542,92 @@ tbody tr:last-child td { border-bottom: none; }
   .nw-table th:last-child, .nw-table td:last-child { padding-right: 0; }
   .nw-table select { padding: .25rem .1rem; font-size: .8rem; }
 }
+
+/* ---------- Equity ---------- */
+.unvested { display: block; margin-top: var(--s1); font-size: .85rem; color: var(--ink-3); text-underline-offset: 3px; }
+.unvested:hover { color: var(--accent); }
+.tile .unvested { margin-top: var(--s2); }
+.eq-price { margin: 0 0 var(--s4); font-variant-numeric: tabular-nums; }
+.eq-card .meter .trk { margin-top: 0; height: .6rem; }
+.eq-card .card-head { margin-bottom: var(--s3); }
+.eq-card .table-wrap { margin-top: var(--s4); }
+.eq-table { border: none; background: none; border-radius: 0; }
+.eq-table th:first-child, .eq-table td:first-child { padding-left: 0; }
+.eq-table th:last-child, .eq-table td:last-child { padding-right: 0; }
+.eq-next td { font-weight: 600; }
+.eq-pills { display: flex; flex-wrap: wrap; gap: var(--s1); align-items: center; }
+.pill.upcoming { border: 1px solid var(--line); color: var(--ink-2); }
+.eq-rows { gap: var(--s2); flex-direction: column; flex-wrap: nowrap; }
+.eq-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: var(--s2); align-items: center; max-width: 30rem; }
+.eq-row label { display: block; }
+.eq-row input { width: 100%; }
+.eq-row .icon-button { font-size: .9rem; color: var(--ink-2); }
+.eq-row-msg { grid-column: 1 / -1; font-size: .85rem; }
+.eq-row-add { align-items: center; }
+.eq-preview { grid-column: 1 / -1; max-width: 22rem; }
+.eq-preview h3 { margin: 0 0 var(--s1); }
+.eq-prev-row { display: flex; justify-content: space-between; gap: var(--s4); padding: .3rem 0; border-bottom: 1px solid var(--line); font-size: .9rem; }
+.eq-prev-row:last-child { border-bottom: none; }
+@media (max-width: 760px) {
+  .eq-card { padding: var(--s4); }
+  .eq-table { font-size: .9rem; }
+  .eq-table th, .eq-table td { padding: .6rem .3rem; }
+  .eq-table td:first-child { white-space: nowrap; }
+  .eq-table .pill { font-size: .62rem; padding: .1rem .4rem; }
+  .eq-row { grid-template-columns: minmax(8.5rem, 1fr) minmax(0, 5rem) auto; }
+}
+
+/* ---------- Income (M5 round 2) ---------- */
+.inc-dl { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 0 var(--s5); margin: 0; font-variant-numeric: tabular-nums; }
+.inc-dl > div { display: flex; justify-content: space-between; gap: var(--s4); padding: .45rem 0; border-bottom: 1px solid var(--line); }
+.inc-dl dt { color: var(--ink-3); }
+.inc-dl dd { margin: 0; text-align: right; }
+.inc-lines { grid-template-columns: minmax(0, 24rem); }
+.inc-lines .inc-net { border-bottom: none; font-weight: 600; }
+.inc-lines .inc-net dt { color: var(--ink); }
+.inc-first { margin-top: 0; }
+.inc-form { grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); }
+.inc-form-note { grid-column: 1 / -1; margin: 0; }
+.inc-error { grid-column: 1 / -1; margin: 0; }
+.inc-repay { flex-direction: row; align-items: flex-end; }
+.inc-repay legend { width: 100%; }
+.inc-repay label { display: flex; flex-direction: column; gap: .25rem; min-width: 11rem; }
+.inc-table { border: none; background: none; border-radius: 0; margin-top: var(--s4); }
+.inc-table th:first-child, .inc-table td:first-child { padding-left: 0; }
+.inc-table th:last-child, .inc-table td:last-child { padding-right: 0; }
+.inc-table tbody tr:last-child td { border-bottom: none; }
+.inc-pay-main { min-width: 0; display: flex; flex-direction: column; }
+.inc-claw-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 var(--s4); padding: .6rem 0; border-bottom: 1px solid var(--line); }
+.inc-claw-row:last-child { border-bottom: none; }
+.inc-claw-text { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.inc-claw-total { margin: var(--s3) 0 0; padding-top: var(--s3); border-top: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.inc-details { margin-top: 0; }
+.inc-details > summary { font-size: .95rem; }
+.inc-tax { margin-top: var(--s4); }
+.inc-tax > .muted { margin: var(--s4) 0 0; }
+.inc-bracket-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 0 var(--s5); }
+.inc-brackets { margin-top: var(--s4); }
+.set-hint { margin: calc(var(--s2) * -1) 0 0; font-variant-numeric: tabular-nums; }
+.set-hint button { margin-left: var(--s2); padding: .1rem .6rem; font-size: .85rem; }
+@media (max-width: 760px) {
+  .inc-table { font-size: .82rem; }
+  .inc-table th.num { white-space: normal; vertical-align: bottom; }
+  .inc-table th, .inc-table td { padding: .6rem .25rem; }
+  .inc-table th { font-size: .66rem; letter-spacing: .02em; }
+  .inc-repay { flex-direction: column; align-items: stretch; }
+}
+
+/* ---------- Tax estimate, total comp, set-aside alert ---------- */
+.inc-years { display: inline-flex; align-items: center; gap: var(--s2); font-variant-numeric: tabular-nums; }
+.inc-year { min-width: 3.2rem; text-align: center; font-weight: 600; }
+.inc-years .icon-button { font-size: 1.5rem; line-height: 1; padding: .2rem .7rem; }
+.inc-headline { margin: 0 0 var(--s4); font-family: var(--serif); font-size: 1.5rem; letter-spacing: -0.01em; line-height: 1.2; }
+.inc-headline strong { font-weight: 500; }
+.inc-lines .inc-after { border-bottom: none; }
+.inc-lines .inc-net { border-bottom: 1px solid var(--line); }
+.eq-growth { display: flex; align-items: center; gap: var(--s2); font-size: .9rem; color: var(--ink-3); }
+.eq-comp-table th, .eq-comp-table th.num, .eq-comp-table td { white-space: nowrap; }
+.ov-alert { margin-bottom: 0; border-color: var(--amber); background: var(--pill-partial); color: var(--pill-partial-ink); }
+.ov-alert .card-title { color: inherit; }
+.ov-alert p { margin: 0; }
+.ov-alert .tile-link { color: inherit; font-weight: 600; }

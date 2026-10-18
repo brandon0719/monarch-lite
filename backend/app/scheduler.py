@@ -10,7 +10,7 @@ from . import config
 from .db import SessionLocal
 from .models import SyncRun, utcnow
 from .services import backup as backup_service
-from .services import sync
+from .services import prices, sync
 
 log = logging.getLogger("monarch-lite.scheduler")
 EVERY = dt.timedelta(hours=24)
@@ -45,6 +45,10 @@ def run_due_jobs(db: Session, now: dt.datetime, local_now: dt.datetime) -> list[
     if age is None or age > EVERY:
         backup_service.backup(config.DB_PATH, config.BACKUP_DIR, now=local_now)
         done.append("backup")
+    try:
+        prices.refresh_all(db, now)
+    except Exception:  # prices are optional; never block sync or backup
+        log.exception("price refresh failed")
     return done
 
 

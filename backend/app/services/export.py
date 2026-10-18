@@ -11,7 +11,8 @@ TABLES = (
     "accounts", "balance_snapshots", "transactions", "tags", "transaction_tags", "categories", "rules", "sync_runs",
     "budget_settings", "category_budgets", "recurring_items", "recurring_dismissals",
     "goals", "goal_accounts", "goal_contributions", "holdings",
-    "asset_classes", "allocation_targets",
+    "asset_classes", "allocation_targets", "rsu_grants", "rsu_vests", "prices",
+    "income_profiles", "cash_payments",
 )
 
 

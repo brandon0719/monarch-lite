@@ -1,14 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
 import { api, type AllocationTargets, type BudgetSettings } from '../api'
-import { dollarsToCents, formatDateTime } from '../format'
+import { dollarsToCents, formatCents, formatDateTime } from '../format'
 
 const dollars = (cents: number | null) => (cents === null ? '' : (cents / 100).toFixed(2))
 const wholePct = (text: string) => (/^\d{1,3}$/.test(text.trim()) ? Number(text) : null)
 
 const PCT_FIELDS = [['needs_pct', 'Needs'], ['wants_pct', 'Wants'], ['savings_pct', 'Savings']] as const
 
-function BudgetForm({ saved }: { saved: BudgetSettings }) {
+function BudgetForm({ saved, modeled }: { saved: BudgetSettings; modeled: number | null }) {
   const qc = useQueryClient()
   const [takeHome, setTakeHome] = useState(dollars(saved.take_home_cents))
   const [pcts, setPcts] = useState({ needs_pct: String(saved.needs_pct), wants_pct: String(saved.wants_pct), savings_pct: String(saved.savings_pct) })
@@ -48,6 +48,12 @@ function BudgetForm({ saved }: { saved: BudgetSettings }) {
           <input inputMode="decimal" value={takeHome} onChange={(e) => { setTakeHome(e.target.value); save.reset() }} placeholder="0.00" />
         </label>
       </div>
+      {modeled !== null && modeled !== saved.take_home_cents && (
+        <p className="muted set-hint">
+          Modeled take-home {formatCents(modeled)}/mo{' '}
+          <button type="button" aria-label={`Use modeled take-home ${formatCents(modeled)} per month`} onClick={() => { setTakeHome(dollars(modeled)); save.reset() }}>Use it</button>
+        </p>
+      )}
       <fieldset>
         <legend>Split of take-home (%)</legend>
         <div className="form-grid">
@@ -157,6 +163,9 @@ export default function Settings() {
   const budget = useQuery({ queryKey: ['budgetSettings'], queryFn: api.budgetSettings })
   const targets = useQuery({ queryKey: ['allocationTargets'], queryFn: api.allocationTargets })
   const backup = useMutation({ mutationFn: api.backup })
+  // The Income page's modeled paycheck. No salary or no tax table (an error) just means no hint.
+  const year = new Date().getFullYear()
+  const modeled = useQuery({ queryKey: ['income', 'paychecks', year], queryFn: () => api.paychecks(year) })
 
   return (
     <>
@@ -206,7 +215,7 @@ export default function Settings() {
         <p className="muted set-blurb">Targets for needs (rent included), wants and savings, worked out from your monthly take-home pay.</p>
         {budget.isLoading && <p className="muted" role="status">Loading…</p>}
         {budget.error && <p className="error" role="alert">{budget.error.message}</p>}
-        {budget.data && <BudgetForm saved={budget.data} />}
+        {budget.data && <BudgetForm saved={budget.data} modeled={modeled.data?.monthly_take_home_cents ?? null} />}
       </section>
 
       <section className="card" aria-labelledby="set-targets">
