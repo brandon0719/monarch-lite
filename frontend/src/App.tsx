@@ -69,6 +69,8 @@ export default function App() {
     return () => document.removeEventListener('keydown', onKey)
   }, [navOpen])
   const overview = useQuery({ queryKey: ['overview'], queryFn: () => api.overview() })
+  const alerts = useQuery({ queryKey: ['alerts'], queryFn: api.alerts })
+  const openAlerts = alerts.isError ? 0 : alerts.data?.alerts.length ?? 0
   const toReview = overview.data?.to_review ?? 0
   const syncedAt = overview.data?.last_synced_at
   // Backend datetimes are naive UTC.
@@ -82,6 +84,7 @@ export default function App() {
           {NAV.map(([to, label]) => (
             <NavLink key={to} to={to} onClick={() => setNavOpen(false)}>
               {label}
+              {to === '/overview' && openAlerts > 0 && <span className="badge" role="img" aria-label={`${openAlerts} open alert${openAlerts === 1 ? '' : 's'}`}>{openAlerts}</span>}
               {to === '/transactions' && toReview > 0 && <span className="badge">{toReview}<span className="visually-hidden"> to review</span></span>}
             </NavLink>
           ))}
