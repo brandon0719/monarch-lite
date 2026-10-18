@@ -3,9 +3,11 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { api, type Category, type SpendingRow } from '../api'
 import CategoryChip from '../components/CategoryChip'
-import UnvestedLine from '../components/UnvestedLine'
+import AlertsCard from '../components/AlertsCard'
+import { DueCard, GoalsCard, VestCard } from '../components/OverviewSide'
+import { BudgetTile, MonthTile, NetWorthTile } from '../components/OverviewTiles'
 import { categoryColor, NEUTRAL } from '../colors'
-import { formatCents, formatDate, formatDateTime, monthLabel } from '../format'
+import { formatCents, formatDate, monthLabel } from '../format'
 
 const TOP_N = 6
 
@@ -23,75 +25,116 @@ function topWithOther(rows: SpendingRow[]): SpendingRow[] {
   return [...sorted.slice(0, TOP_N), { category_id: null, name: 'Other', cents: rest }]
 }
 
-function UpcomingCard() {
-  const up = useQuery({ queryKey: ['recurring', 'upcoming', 30], queryFn: () => api.upcoming(30) })
-  const rec = useQuery({ queryKey: ['recurring'], queryFn: api.recurring })
-  const alerts = rec.data?.alerts.length ?? 0
+/** Cards that read the overview each handle their own loading and error, so one failing query never blanks the page. */
+function useOverview() {
+  return useQuery({ queryKey: ['overview'], queryFn: () => api.overview() })
+}
+
+function ReviewTile() {
+  const overview = useOverview()
   return (
-    <section className="card" aria-labelledby="ov-upcoming">
-      <h2 className="card-title" id="ov-upcoming">Upcoming</h2>
-      {up.isPending && <p className="muted" role="status">Loading…</p>}
-      {up.isError && <p className="error" role="alert">{up.error.message}</p>}
-      {up.data && (up.data.rows.length === 0 ? (
-        <p className="muted">Nothing expected in the next 30 days.</p>
+    <div className="tile">
+      <div className="tile-label">To review</div>
+      {overview.isPending && <p className="muted" role="status">Loading…</p>}
+      {overview.isError && <p className="error" role="alert">{overview.error.message}</p>}
+      {overview.data && <div className="tile-value">{overview.data.to_review}</div>}
+      <Link className="tile-link" to="/transactions?tab=review">Review now →</Link>
+    </div>
+  )
+}
+
+function SpendingCard({ byId }: { byId: Map<number, Category> }) {
+  const overview = useOverview()
+  const o = overview.data
+  const month = o ? monthLabel(o.month) : null
+  const spending = o ? topWithOther(o.spending_by_category) : []
+  const max = Math.max(1, ...spending.map((r) => r.cents))
+  return (
+    <section className="card" aria-labelledby="ov-spending">
+      <h2 className="card-title" id="ov-spending">{month ? `${month} spending by category` : 'Spending by category'}</h2>
+      {overview.isPending && <p className="muted" role="status">Loading…</p>}
+      {overview.isError && <p className="error" role="alert">{overview.error.message}</p>}
+      {o && (spending.length === 0 ? (
+        <p className="muted">No spending yet this month.</p>
       ) : (
-        <ul className="recent-list">
-          {up.data.rows.slice(0, 5).map((r) => (
-            <li key={`${r.item_id}-${r.date}`} className="up-row">
-              <span className="recent-main">
-                <span className="recent-merchant">{r.name}</span>
-                <span className="tx-sub">{formatDate(r.date)}{r.late && <span className="error"> · Late</span>}</span>
-              </span>
-              <span className={`amount${r.amount_cents > 0 ? ' pos' : ''}`}>{formatCents(r.amount_cents)}</span>
-            </li>
-          ))}
+        <ul className="bar-list">
+          {spending.map((r) => {
+            const cat = r.category_id === null ? null : byId.get(r.category_id)
+            const color = cat ? categoryColor(cat) : NEUTRAL
+            return (
+              <li key={r.category_id ?? r.name} className="bar-row" title={`${r.name}: ${formatCents(r.cents)}`}>
+                <span className="bar-name">{r.name}</span>
+                <span className="bar" aria-hidden="true">
+                  <span style={{ '--bar': color, width: `${(Math.max(0, r.cents) / max) * 100}%` } as CSSProperties} />
+                </span>
+                <span className="amount">{formatCents(r.cents)}</span>
+              </li>
+            )
+          })}
         </ul>
       ))}
-      <div className="up-foot">
-        {rec.isError ? <span className="muted">Alerts unavailable</span>
-          : alerts > 0 && <span className="error">{alerts} {alerts === 1 ? 'alert' : 'alerts'}</span>}
-        <Link className="tile-link" to="/recurring">See recurring →</Link>
-      </div>
     </section>
   )
 }
 
-/** Shown only when this year's estimate says to set money aside; silent while loading or on error. */
-function TaxAlertCard() {
-  const year = new Date().getFullYear()
-  const est = useQuery({ queryKey: ['income', 'tax-estimate', year], queryFn: () => api.taxEstimate(year) })
-  if (!est.data?.alert) return null
-  const owed = formatCents(est.data.balance_cents)
+function RecentCard({ byId }: { byId: Map<number, Category> }) {
+  const overview = useOverview()
+  const recent = overview.data?.recent
   return (
-    <section className="card ov-alert" aria-labelledby="ov-tax" role="status">
-      <h2 className="card-title" id="ov-tax">Tax set-aside</h2>
-      <p>Projected {est.data.year} under-withholding {owed}. Consider setting aside {owed}.</p>
-      <Link className="tile-link" to="/income">See estimate →</Link>
+    <section className="card" aria-labelledby="ov-recent">
+      <h2 className="card-title" id="ov-recent">Recent</h2>
+      {overview.isPending && <p className="muted" role="status">Loading…</p>}
+      {overview.isError && <p className="error" role="alert">{overview.error.message}</p>}
+      {recent && (recent.length === 0 ? (
+        <p className="muted">No transactions yet.</p>
+      ) : (
+        <ul className="recent-list">
+          {recent.map((t) => (
+            <li key={t.id}>
+              <Link className="recent-row" to="/transactions">
+                <span className="recent-main">
+                  <span className="recent-merchant">{t.merchant}</span>
+                  <span className="tx-sub">{formatDate(t.posted_date)}</span>
+                </span>
+                <CategoryChip category={t.category_id === null ? null : byId.get(t.category_id)} name={t.category_name} />
+                <span className={`amount${t.amount_cents > 0 ? ' pos' : ''}`}>{formatCents(t.amount_cents)}</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      ))}
+    </section>
+  )
+}
+
+function BalancesCard() {
+  const overview = useOverview()
+  const b = overview.data?.balances
+  const rows: [string, number][] = b ? [['Cash', b.cash], ['Investments', b.investments], ['Credit cards', b.credit]] : []
+  if (b && b.loans !== 0) rows.push(['Loans', b.loans])
+  if (b && b.other !== 0) rows.push(['Other', b.other])
+  return (
+    <section className="card" aria-labelledby="ov-balances">
+      <h2 className="card-title" id="ov-balances">Balances</h2>
+      {overview.isPending && <p className="muted" role="status">Loading…</p>}
+      {overview.isError && <p className="error" role="alert">{overview.error.message}</p>}
+      {b && (
+        <dl className="balances">
+          {rows.map(([label, cents]) => (
+            <div key={label} className="balance-row">
+              <dt>{label}</dt>
+              <dd>{formatCents(cents)}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
     </section>
   )
 }
 
 export default function Overview() {
-  const overview = useQuery({ queryKey: ['overview'], queryFn: () => api.overview() })
   const categories = useQuery({ queryKey: ['categories'], queryFn: api.categories })
-
-  if (overview.isPending) return <p className="muted" role="status">Loading…</p>
-  if (overview.isError) return <p className="error" role="alert">{overview.error.message}</p>
-
-  const o = overview.data
   const byId = new Map<number, Category>((categories.data ?? []).map((c) => [c.id, c]))
-  const month = monthLabel(o.month)
-
-  const balanceRows: [string, number][] = [
-    ['Cash', o.balances.cash],
-    ['Investments', o.balances.investments],
-    ['Credit cards', o.balances.credit],
-  ]
-  if (o.balances.loans !== 0) balanceRows.push(['Loans', o.balances.loans])
-  if (o.balances.other !== 0) balanceRows.push(['Other', o.balances.other])
-
-  const spending = topWithOther(o.spending_by_category)
-  const max = Math.max(1, ...spending.map((r) => r.cents))
 
   return (
     <>
@@ -100,86 +143,24 @@ export default function Overview() {
       </header>
 
       <div className="tiles">
-        <div className="tile">
-          <div className="tile-label">Net worth</div>
-          <div className="tile-value">{formatCents(o.net_worth_cents)}</div>
-          <UnvestedLine />
-          <div className="tile-sub">{o.last_synced_at ? `as of ${formatDateTime(o.last_synced_at)}` : 'Not synced yet'}</div>
-          <Link className="tile-link" to="/networth">See history →</Link>
-        </div>
-        <div className="tile">
-          <div className="tile-label">Spent in {month}</div>
-          <div className="tile-value">{formatCents(o.spent_cents)}</div>
-          <Link className="tile-link" to="/spending">See spending →</Link>
-        </div>
-        <div className="tile">
-          <div className="tile-label">To review</div>
-          <div className="tile-value">{o.to_review}</div>
-          <Link className="tile-link" to="/transactions?tab=review">Review now →</Link>
-        </div>
+        <NetWorthTile />
+        <MonthTile />
+        <BudgetTile />
+        <ReviewTile />
       </div>
 
       <div className="ov-grid">
-        <section className="card" aria-labelledby="ov-spending">
-          <h2 className="card-title" id="ov-spending">{month} spending by category</h2>
-          {spending.length === 0 ? (
-            <p className="muted">No spending yet this month.</p>
-          ) : (
-            <ul className="bar-list">
-              {spending.map((r) => {
-                const cat = r.category_id === null ? null : byId.get(r.category_id)
-                const color = cat ? categoryColor(cat) : NEUTRAL
-                return (
-                  <li key={r.category_id ?? r.name} className="bar-row" title={`${r.name}: ${formatCents(r.cents)}`}>
-                    <span className="bar-name">{r.name}</span>
-                    <span className="bar" aria-hidden="true">
-                      <span style={{ '--bar': color, width: `${(Math.max(0, r.cents) / max) * 100}%` } as CSSProperties} />
-                    </span>
-                    <span className="amount">{formatCents(r.cents)}</span>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </section>
-
         <div className="ov-side">
-          <TaxAlertCard />
-          <UpcomingCard />
+          <AlertsCard />
+          <DueCard />
+          <VestCard />
+          <GoalsCard />
+          <BalancesCard />
+        </div>
 
-          <section className="card" aria-labelledby="ov-balances">
-            <h2 className="card-title" id="ov-balances">Balances</h2>
-            <dl className="balances">
-              {balanceRows.map(([label, cents]) => (
-                <div key={label} className="balance-row">
-                  <dt>{label}</dt>
-                  <dd>{formatCents(cents)}</dd>
-                </div>
-              ))}
-            </dl>
-          </section>
-
-          <section className="card" aria-labelledby="ov-recent">
-            <h2 className="card-title" id="ov-recent">Recent</h2>
-            {o.recent.length === 0 ? (
-              <p className="muted">No transactions yet.</p>
-            ) : (
-              <ul className="recent-list">
-                {o.recent.map((t) => (
-                  <li key={t.id}>
-                    <Link className="recent-row" to="/transactions">
-                      <span className="recent-main">
-                        <span className="recent-merchant">{t.merchant}</span>
-                        <span className="tx-sub">{formatDate(t.posted_date)}</span>
-                      </span>
-                      <CategoryChip category={t.category_id === null ? null : byId.get(t.category_id)} name={t.category_name} />
-                      <span className={`amount${t.amount_cents > 0 ? ' pos' : ''}`}>{formatCents(t.amount_cents)}</span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+        <div className="ov-main">
+          <SpendingCard byId={byId} />
+          <RecentCard byId={byId} />
         </div>
       </div>
     </>

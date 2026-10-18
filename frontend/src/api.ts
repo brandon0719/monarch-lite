@@ -224,6 +224,11 @@ export interface TaxConfig {
   state: { name: string; payroll: { name: string; rate_bp: number }[] }
 }
 
+export type AlertKind = 'sync_error' | 'sync_stale' | 'price_increase' | 'new_recurring' | 'under_withholding' | 'allocation_drift'
+export interface Alert { key: string; kind: AlertKind; severity: 'warn' | 'info'; title: string; detail: string; link: string }
+/** `unavailable` names the sources that failed to run: sync, recurring, tax or allocation. */
+export interface Alerts { alerts: Alert[]; unavailable: string[] }
+
 export class ApiError extends Error {
   constructor(message: string, readonly status: number) { super(message) }
 }
@@ -315,5 +320,7 @@ export const api = {
   patchPayment: (id: number, body: CashPaymentInput) => request<CashPayment>(`/income/payments/${id}`, send('PATCH', body)),
   deletePayment: (id: number) => request<void>(`/income/payments/${id}`, send('DELETE')),
   clawback: () => request<Clawback>('/income/clawback'),
+  alerts: () => request<Alerts>('/alerts'),
+  dismissAlert: (key: string) => request<void>('/alerts/dismiss', send('POST', { key })),
   backup: () => request<{ path: string }>('/backups', send('POST')),
 }

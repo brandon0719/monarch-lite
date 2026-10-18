@@ -1,7 +1,8 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useEffect, useId, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 import { api, type Account, type Goal, type GoalInput } from '../api'
-import { dollarsToCents, formatCents, formatDate, formatPct, isoDate, monthLabel } from '../format'
+import { statusLine } from '../goals'
+import { dollarsToCents, formatCents, formatDate, formatPct, isoDate } from '../format'
 
 const dollars = (cents: number) => (cents / 100).toFixed(2)
 const LINKABLE = new Set(['savings', 'investment'])
@@ -10,26 +11,6 @@ type AccountsStatus = 'pending' | 'error' | 'success'
 
 const sameIds = (a: number[], b: number[]) => a.length === b.length && a.every((id) => b.includes(id))
 const percent = (g: Goal) => formatPct(Math.round(g.pct * 100))
-
-function reachedBy(reachBy: string): string {
-  const label = monthLabel(reachBy.slice(0, 7))
-  // monthLabel only adds the year outside the current year; the status text always names it.
-  return /\d{4}$/.test(label) ? label : `${label} ${reachBy.slice(0, 4)}`
-}
-
-function statusLine(g: Goal): { text: string; behind?: boolean } {
-  const rate = g.rate_cents === null ? null : formatCents(g.rate_cents)
-  const unknown = { text: `Saving rate available after 2 weeks of history (${g.history_days ?? 0} days so far)` }
-  switch (g.status) {
-    case 'done': return { text: 'Done' }
-    case 'unknown': return unknown
-    case 'on_track': return { text: `Needed ${formatCents(g.needed_cents ?? 0)}/mo · saving ${rate ?? formatCents(0)}/mo · On track` }
-    case 'behind': return { text: `Needed ${formatCents(g.needed_cents ?? 0)}/mo · saving ${rate ?? formatCents(0)}/mo · `, behind: true }
-    default:
-      if (rate === null) return unknown
-      return { text: g.reach_by ? `Saving ${rate}/mo · at this rate, reached by ${reachedBy(g.reach_by)}` : `Saving ${rate}/mo` }
-  }
-}
 
 function GoalForm({ initial, accounts, accountsStatus, takenIds, busy, error, submitLabel, onSubmit, onCancel }: {
   initial?: Goal; accounts: Account[]; accountsStatus: AccountsStatus; takenIds: Set<number>; busy: boolean; error: string | null

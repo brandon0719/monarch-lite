@@ -323,3 +323,12 @@ class CashPayment(Base):
     repay_start: Mapped[dt.date | None]
     repay_end: Mapped[dt.date | None]
     created_at: Mapped[dt.datetime] = mapped_column(default=utcnow)
+
+
+class DismissedAlert(Base):
+    """An alerts-center key the owner dismissed (FR-DASH-02); a changed situation produces a new key."""
+
+    __tablename__ = "dismissed_alerts"
+
+    key: Mapped[str] = mapped_column(primary_key=True)
+    dismissed_at: Mapped[dt.datetime] = mapped_column(default=utcnow)
