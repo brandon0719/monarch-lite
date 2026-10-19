@@ -9,13 +9,16 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import Account, BalanceSnapshot, Category, RecurringDismissal, RecurringItem, Transaction
+from ..services import paycheck
 from ..services import recurring as svc
+from . import income
 from .params import MAX_ID, Id
 from .category_budgets import MAX_AMOUNT_CENTS
 
 router = APIRouter(prefix="/api/recurring", tags=["recurring"])
 Cadence = Literal["weekly", "monthly", "yearly"]
-REQUIRED = ("merchant", "name", "amount_cents", "cadence", "anchor_date")
+REQUIRED = ("merchant", "name", "amount_cents", "cadence", "anchor_date", "follows_paycheck")
+OUTLIER_FRACTION = 4  # a deposit more than 1/4 (25%) away from the modeled take-home is a bonus or sign-on month
 
 
 def _nonzero(value: int | None) -> int | None:
@@ -32,6 +35,7 @@ class ItemIn(BaseModel):
     cadence: Cadence
     anchor_date: dt.date
     category_id: int | None = Field(default=None, ge=1, le=MAX_ID)
+    follows_paycheck: bool = False
     _amount = field_validator("amount_cents")(_nonzero)
 
 
@@ -43,6 +47,7 @@ class ItemPatch(BaseModel):
     cadence: Cadence | None = None
     anchor_date: dt.date | None = None
     category_id: int | None = Field(default=None, ge=1, le=MAX_ID)
+    follows_paycheck: bool | None = None
     _amount = field_validator("amount_cents")(_nonzero)
 
 
@@ -54,6 +59,7 @@ class ItemOut(BaseModel):
     cadence: str
     anchor_date: dt.date
     category_id: int | None
+    follows_paycheck: bool
     next_due: dt.date
     status: Literal["upcoming", "late"]
     last_amount_cents: int | None
@@ -112,8 +118,39 @@ class UpcomingOut(BaseModel):
     income_cents: int
 
 
-def _scan(db: Session, item: RecurringItem) -> tuple[list[tuple[dt.date, int]], list[tuple[dt.date, int]], dt.date]:
-    """(same-sign history, matching payments, next_due) for an item; transactions on visible accounts, oldest first."""
+def _paycheck_reference(db: Session) -> int | None:
+    """Modeled monthly take-home from the salary profile in effect today; None without a profile or tax config."""
+    today = dt.date.today()
+    profiles = [income._as_profile(p) for p in income._profiles(db)]
+    profile = paycheck.profile_on(profiles, today) or (profiles[-1] if profiles else None)
+    if profile is None:
+        return None
+    try:
+        ty, _ = income._tax_year_or_earlier(today.year)
+    except HTTPException as exc:
+        if exc.status_code != 404:  # a broken tax config should surface, not silently change the amount
+            raise
+        return None
+    take_home = paycheck.monthly_take_home(profile, ty)
+    return take_home if take_home > 0 else None  # withholding can exceed pay; that's no reference
+
+
+def _expected(item: RecurringItem, history: list[tuple[dt.date, int]], reference: int | None) -> int:
+    """The amount to expect: saved, or for a paycheck item the latest deposit near the modeled take-home."""
+    if not item.follows_paycheck:
+        return item.amount_cents
+    deposits = [cents for _, cents in history]
+    if reference is None:
+        return deposits[-1] if deposits else item.amount_cents
+    usual = [cents for cents in deposits if abs(cents - reference) * OUTLIER_FRACTION <= reference]
+    return usual[-1] if usual else reference
+
+
+def _scan(db: Session, item: RecurringItem, reference: int | None = None
+          ) -> tuple[list[tuple[dt.date, int]], list[tuple[dt.date, int]], dt.date, int]:
+    """(same-sign history, matching payments, next_due, expected amount) for an item; visible accounts, oldest first.
+
+    `reference` is the modeled take-home (`_paycheck_reference`), used only by paycheck items."""
     rows = db.execute(
         select(Transaction.posted_date, Transaction.amount_cents)
         .join(Transaction.account)
@@ -121,15 +158,17 @@ def _scan(db: Session, item: RecurringItem) -> tuple[list[tuple[dt.date, int]], 
         .order_by(Transaction.posted_date, Transaction.id)
     ).all()
     history = [(day, cents) for day, cents in rows if cents * item.amount_cents > 0]  # strictly same sign
-    matches = [(day, cents) for day, cents in history if svc.amount_matches(item.amount_cents, cents)]
-    return history, matches, svc.next_due(item.anchor_date, item.cadence, [day for day, _ in matches])
+    amount = _expected(item, history, reference)
+    matches = [(day, cents) for day, cents in history if svc.amount_matches(amount, cents)]
+    return history, matches, svc.next_due(item.anchor_date, item.cadence, [day for day, _ in matches]), amount
 
 
-def _item_out(item: RecurringItem, matches: list[tuple[dt.date, int]], due: dt.date, today: dt.date) -> ItemOut:
+def _item_out(item: RecurringItem, matches: list[tuple[dt.date, int]], due: dt.date, today: dt.date,
+              amount: int) -> ItemOut:
     last = matches[-1] if matches else (None, None)
     return ItemOut(
-        id=item.id, merchant=item.merchant, name=item.name, amount_cents=item.amount_cents, cadence=item.cadence,
-        anchor_date=item.anchor_date, category_id=item.category_id, next_due=due,
+        id=item.id, merchant=item.merchant, name=item.name, amount_cents=amount, cadence=item.cadence,
+        anchor_date=item.anchor_date, category_id=item.category_id, follows_paycheck=item.follows_paycheck, next_due=due,
         status="late" if svc.is_late(due, today) else "upcoming", last_date=last[0], last_amount_cents=last[1],
     )
 
@@ -174,6 +213,16 @@ def _check_category(db: Session, category_id: int | None) -> None:
         raise HTTPException(422, "Category not found")
 
 
+def _single_out(db: Session, item: RecurringItem) -> ItemOut:
+    _, matches, due, amount = _scan(db, item, _paycheck_reference(db) if item.follows_paycheck else None)
+    return _item_out(item, matches, due, dt.date.today(), amount)
+
+
+def _check_paycheck(follows: bool, amount_cents: int) -> None:
+    if follows and amount_cents < 0:
+        raise HTTPException(422, "Only income can follow your paycheck")
+
+
 def _get_item(db: Session, item_id: int) -> RecurringItem:
     item = db.get(RecurringItem, item_id)
     if item is None:
@@ -186,9 +235,10 @@ def get_recurring(db: Session = Depends(get_db)):
     today = dt.date.today()
     items, alerts = [], []
     all_items = list(db.scalars(select(RecurringItem)))
+    reference = _paycheck_reference(db) if any(i.follows_paycheck for i in all_items) else None
     for item in all_items:
-        history, matches, due = _scan(db, item)
-        items.append(_item_out(item, matches, due, today))
+        history, matches, due, amount = _scan(db, item, reference)
+        items.append(_item_out(item, matches, due, today, amount))
         if item.amount_cents >= 0:
             continue  # bills only
         # "Latest" is the newest charge that isn't a sibling item's (same merchant, matching its amount instead),
@@ -210,11 +260,11 @@ def get_recurring(db: Session = Depends(get_db)):
 @router.post("/items", response_model=ItemOut, status_code=201)
 def create_item(body: ItemIn, db: Session = Depends(get_db)):
     _check_category(db, body.category_id)
+    _check_paycheck(body.follows_paycheck, body.amount_cents)
     item = RecurringItem(**body.model_dump(exclude={"name"}), name=body.name or body.merchant)
     db.add(item)
     db.commit()
-    _, matches, due = _scan(db, item)
-    return _item_out(item, matches, due, dt.date.today())
+    return _single_out(db, item)
 
 
 @router.patch("/items/{item_id}", response_model=ItemOut)
@@ -222,14 +272,14 @@ def patch_item(item_id: Id, body: ItemPatch, db: Session = Depends(get_db)):
     item = _get_item(db, item_id)
     data = body.model_dump(exclude_unset=True)
     if any(key in data and data[key] is None for key in REQUIRED):
-        raise HTTPException(422, "Merchant, name, amount, cadence and next date can't be empty")
+        raise HTTPException(422, "Merchant, name, amount, cadence, next date and paycheck setting can't be empty")
+    _check_paycheck(data.get("follows_paycheck", item.follows_paycheck), data.get("amount_cents", item.amount_cents))
     if "category_id" in data:
         _check_category(db, data["category_id"])
     for key, value in data.items():
         setattr(item, key, value)
     db.commit()
-    _, matches, due = _scan(db, item)
-    return _item_out(item, matches, due, dt.date.today())
+    return _single_out(db, item)
 
 
 @router.delete("/items/{item_id}", status_code=204)
@@ -261,8 +311,7 @@ def confirm_suggestion(body: MerchantIn, db: Session = Depends(get_db)):
                          cadence=suggestion["cadence"], anchor_date=suggestion["next_date"], category_id=category_id)
     db.add(item)
     db.commit()
-    _, matches, due = _scan(db, item)
-    return _item_out(item, matches, due, dt.date.today())
+    return _single_out(db, item)
 
 
 @router.post("/suggestions/dismiss", status_code=204)
@@ -278,11 +327,13 @@ def get_upcoming(days: int = Query(30, ge=1, le=90), db: Session = Depends(get_d
     today = dt.date.today()
     horizon = today + dt.timedelta(days=days)
     planned = []
-    for item in db.scalars(select(RecurringItem)):
-        _, _, due = _scan(db, item)
+    all_items = list(db.scalars(select(RecurringItem)))
+    reference = _paycheck_reference(db) if any(i.follows_paycheck for i in all_items) else None
+    for item in all_items:
+        _, _, due, amount = _scan(db, item, reference)
         late = svc.is_late(due, today)
         for day in svc.upcoming_dates(item.anchor_date, item.cadence, due, today, horizon):
-            planned.append((day, item.name, item.id, item.amount_cents, late and day == due))
+            planned.append((day, item.name, item.id, amount, late and day == due))
     planned.sort(key=lambda p: (p[0], p[1]))
     start = _checking_balance(db)
     running, rows = start, []

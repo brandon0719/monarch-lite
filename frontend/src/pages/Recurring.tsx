@@ -33,6 +33,7 @@ function ItemForm({ initial, merchants, categories, busy, error, submitLabel, on
   const [cadence, setCadence] = useState<Cadence>(initial?.cadence ?? 'monthly')
   const [date, setDate] = useState(initial?.next_due ?? isoDate(new Date()))
   const [categoryId, setCategoryId] = useState(initial?.category_id == null ? '' : String(initial.category_id))
+  const [follows, setFollows] = useState(initial?.follows_paycheck ?? false)
   const key = initial?.id ?? 'new'
   const cents = dollarsToCents(amount)
   const [field, reason] = !merchant.trim() ? ['merchant', 'Enter a merchant'] as const
@@ -46,7 +47,7 @@ function ItemForm({ initial, merchants, categories, busy, error, submitLabel, on
     const full: RecurringInput = {
       merchant: merchant.trim(), name: name.trim() || merchant.trim(),
       amount_cents: kind === 'bill' ? -cents : cents, cadence, anchor_date: date,
-      category_id: categoryId ? Number(categoryId) : null,
+      category_id: categoryId ? Number(categoryId) : null, follows_paycheck: kind === 'income' && follows,
     }
     // Edit sends only what changed. The date field shows next_due, so it only counts as changed if the user moved it;
     // otherwise a month-end anchor (the 31st) would be rewritten to the clamped day.
@@ -54,10 +55,12 @@ function ItemForm({ initial, merchants, categories, busy, error, submitLabel, on
     if (initial) {
       if (full.merchant !== initial.merchant) changed.merchant = full.merchant
       if (full.name !== initial.name) changed.name = full.name
-      if (full.amount_cents !== initial.amount_cents) changed.amount_cents = full.amount_cents
+      // Turning "follows" off keeps the amount on screen (the latest paycheck), not the stale saved fallback.
+      if (full.amount_cents !== initial.amount_cents || (initial.follows_paycheck && !full.follows_paycheck)) changed.amount_cents = full.amount_cents
       if (full.cadence !== initial.cadence) changed.cadence = full.cadence
       if (date !== initial.next_due) changed.anchor_date = date
       if (full.category_id !== initial.category_id) changed.category_id = full.category_id
+      if (full.follows_paycheck !== initial.follows_paycheck) changed.follows_paycheck = full.follows_paycheck
       if (Object.keys(changed).length === 0) { onCancel(); return }
     }
     onSubmit(full, changed)
@@ -77,7 +80,7 @@ function ItemForm({ initial, merchants, categories, busy, error, submitLabel, on
           <option value="income">Income</option>
         </select>
       </label>
-      <label>Amount ($)
+      <label>{kind === 'income' && follows ? 'Fallback amount ($)' : 'Amount ($)'}
         <input inputMode="decimal" value={amount} aria-invalid={amount !== '' && (cents === null || cents <= 0)} aria-describedby={field === 'amount' ? reasonId : undefined} onChange={(e) => setAmount(e.target.value)} />
       </label>
       <label>Repeats
@@ -94,6 +97,16 @@ function ItemForm({ initial, merchants, categories, busy, error, submitLabel, on
           {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
       </label>
+      {kind === 'income' && (
+        <div className="rc-follow">
+          <label className="gl-choice">
+            <input type="checkbox" checked={follows} aria-describedby={`rc-follow-hint-${key}`} onChange={(e) => setFollows(e.target.checked)} /> Amount follows my latest paycheck
+          </label>
+          <p className="muted" id={`rc-follow-hint-${key}`}>
+            Uses the latest deposit from this merchant, skipping bonus or sign-on months. The fallback amount is used only when there's no deposit yet and no salary on the Income page.
+          </p>
+        </div>
+      )}
       <div className="actions-row rc-actions">
         <button type="submit" className="primary" disabled={busy || reason !== null}>{submitLabel}</button>
         <button type="button" onClick={onCancel}>Cancel</button>
@@ -251,7 +264,7 @@ export default function Recurring() {
                   <span className="recent-main">
                     <span className="recent-merchant">{item.name}</span>
                     <span className="tx-sub">
-                      {item.cadence} · {item.status === 'late' ? <span className="error">Late since {formatDate(item.next_due)}</span> : `next ${formatDate(item.next_due)}`}
+                      {item.cadence}{item.follows_paycheck && ' · follows latest paycheck'} · {item.status === 'late' ? <span className="error">Late since {formatDate(item.next_due)}</span> : `next ${formatDate(item.next_due)}`}
                       {item.last_date && ` · last ${formatCents(item.last_amount_cents!)} on ${formatDate(item.last_date)}`}
                     </span>
                   </span>

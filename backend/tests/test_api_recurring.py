@@ -288,3 +288,85 @@ def test_shared_merchant_price_alert_ignores_the_other_items_charge(client, db):
     make_txn(db, acct, -1499, second + dt.timedelta(days=1), merchant="Amazon")  # Prime posts last
     assert [a for a in _price_alerts(client) if a["item_id"] == music["id"]] == []
     assert _price_alerts(client) == []
+
+
+# ---- paycheck items follow the latest normal deposit
+PROFILE = dict(effective_from="2025-03-20", salary_cents=12000000, k401_pct=10, filing_status="single",
+               extra_withholding_cents=0, employment_start="2025-03-20")
+
+
+def paycheck_item(client, **kw):
+    return add(client, merchant="Northwind Payroll", name="Paycheck", amount_cents=500000,
+               anchor_date=d(14), follows_paycheck=True, **kw)
+
+
+def take_home(client):
+    return client.get("/api/income/paychecks").json()["monthly_take_home_cents"]
+
+
+def test_follows_paycheck_only_for_income(client, db):
+    assert add(client, follows_paycheck=True).status_code == 422            # a bill can't follow a paycheck
+    item = paycheck_item(client).json()
+    assert item["follows_paycheck"] is True
+    assert client.patch(f"/api/recurring/items/{item['id']}", json={"amount_cents": -100}).status_code == 422
+    assert client.patch(f"/api/recurring/items/{item['id']}", json={"follows_paycheck": None}).status_code == 422
+    plain = add(client).json()
+    assert plain["follows_paycheck"] is False
+    assert client.patch(f"/api/recurring/items/{plain['id']}", json={"follows_paycheck": True}).status_code == 422
+
+
+def test_paycheck_amount_is_latest_normal_deposit_skipping_outliers(client, db):
+    client.put("/api/income/profiles", json=PROFILE)
+    ref = take_home(client)
+    acct, hidden = make_account(db), make_account(db, name="Hidden", is_hidden=True)
+    item = paycheck_item(client).json()
+    assert item["amount_cents"] == ref                                       # no deposits yet: the modeled take-home
+    make_txn(db, acct, ref - 1000, TODAY - dt.timedelta(days=45), merchant="Northwind Payroll")
+    make_txn(db, acct, ref + 2000, TODAY - dt.timedelta(days=16), merchant="Northwind Payroll")
+    make_txn(db, acct, ref * 4, TODAY - dt.timedelta(days=15), merchant="Northwind Payroll")   # sign-on month: skipped
+    make_txn(db, hidden, ref + 9, TODAY - dt.timedelta(days=5), merchant="Northwind Payroll")  # hidden: ignored
+    (got,) = get(client)["items"]
+    assert got["amount_cents"] == ref + 2000
+    assert (got["last_amount_cents"], got["last_date"]) == (ref + 2000, d(-16))
+    rows = client.get("/api/recurring/upcoming?days=30").json()["rows"]
+    assert [r["amount_cents"] for r in rows] == [ref + 2000]
+
+
+def test_paycheck_amount_falls_back_to_model_when_every_deposit_is_an_outlier(client, db):
+    client.put("/api/income/profiles", json=PROFILE)
+    ref = take_home(client)
+    make_txn(db, make_account(db), ref * 4, TODAY - dt.timedelta(days=15), merchant="Northwind Payroll")
+    paycheck_item(client)
+    assert get(client)["items"][0]["amount_cents"] == ref
+
+
+def test_paycheck_without_profile_uses_latest_deposit_then_saved_amount(client, db):
+    item = paycheck_item(client).json()
+    assert item["amount_cents"] == 500000                                    # no profile, no deposits: as saved
+    make_txn(db, make_account(db), 612345, TODAY - dt.timedelta(days=15), merchant="Northwind Payroll")
+    assert get(client)["items"][0]["amount_cents"] == 612345                 # no model to judge outliers: as paid
+
+
+def test_outlier_boundary_is_25_percent_and_follow_can_be_toggled(client, db):
+    client.put("/api/income/profiles", json=PROFILE)
+    ref = take_home(client)
+    acct = make_account(db)
+    make_txn(db, acct, ref + ref // 4, TODAY - dt.timedelta(days=40), merchant="Northwind Payroll")       # exactly 25%: kept
+    make_txn(db, acct, ref + ref // 4 + 1, TODAY - dt.timedelta(days=10), merchant="Northwind Payroll")   # just over: skipped
+    item = paycheck_item(client).json()
+    assert item["amount_cents"] == ref + ref // 4
+    off = client.patch(f"/api/recurring/items/{item['id']}", json={"follows_paycheck": False, "amount_cents": 700000}).json()
+    assert (off["follows_paycheck"], off["amount_cents"]) == (False, 700000)
+    assert client.patch(f"/api/recurring/items/{item['id']}", json={"follows_paycheck": True, "amount_cents": -5}).status_code == 422
+    on = client.patch(f"/api/recurring/items/{item['id']}", json={"follows_paycheck": True}).json()
+    assert (on["follows_paycheck"], on["amount_cents"]) == (True, ref + ref // 4)
+
+
+def test_no_tax_config_uses_latest_deposit(client, db, monkeypatch):
+    client.put("/api/income/profiles", json=PROFILE)
+    from app.services import tax
+    monkeypatch.setattr(tax, "load_year", lambda year: None)
+    monkeypatch.setattr(tax, "years_before", lambda year: [])
+    make_txn(db, make_account(db), 2900000, TODAY - dt.timedelta(days=15), merchant="Northwind Payroll")
+    paycheck_item(client)
+    assert get(client)["items"][0]["amount_cents"] == 2900000                # no model to judge outliers: as paid
