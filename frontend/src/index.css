@@ -429,6 +429,8 @@ tbody tr:last-child td { border-bottom: none; }
 .rc-bal { text-align: right; font-variant-numeric: tabular-nums; }
 .rc-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: var(--s3); padding: var(--s3) 0; }
 .rc-form label { display: flex; flex-direction: column; gap: .25rem; }
+.rc-follow { grid-column: 1 / -1; }
+.rc-follow p { margin: .25rem 0 0; }
 .rc-actions { grid-column: 1 / -1; align-items: center; }
 @media (max-width: 760px) {
   .rc-row { grid-template-columns: 1fr auto; }

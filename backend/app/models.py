@@ -159,6 +159,7 @@ class RecurringItem(Base):
     cadence: Mapped[str]  # weekly | monthly | yearly
     anchor_date: Mapped[dt.date]
     category_id: Mapped[int | None] = mapped_column(ForeignKey("categories.id", ondelete="SET NULL"))
+    follows_paycheck: Mapped[bool] = mapped_column(default=False)  # income only: amount tracks the latest normal deposit
     created_at: Mapped[dt.datetime] = mapped_column(default=utcnow)
 
 

@@ -126,14 +126,17 @@ function describe(detail: unknown, fallback: string): string {
 export type Cadence = 'weekly' | 'monthly' | 'yearly'
 export interface RecurringItem {
   id: number; merchant: string; name: string; amount_cents: number; cadence: Cadence; anchor_date: string
-  category_id: number | null; next_due: string; status: 'upcoming' | 'late'; last_amount_cents: number | null; last_date: string | null
+  category_id: number | null; follows_paycheck: boolean; next_due: string; status: 'upcoming' | 'late'
+  last_amount_cents: number | null; last_date: string | null
 }
 export interface RecurringSuggestion { merchant: string; cadence: Cadence; amount_cents: number; count: number; last_date: string; next_date: string }
 export type RecurringAlert =
   | { kind: 'price_increase'; item_id: number; name: string; previous_cents: number; latest_cents: number; date: string }
   | { kind: 'new_recurring'; merchant: string; amount_cents: number; cadence: Cadence }
 export interface Recurring { items: RecurringItem[]; suggestions: RecurringSuggestion[]; alerts: RecurringAlert[] }
-export interface RecurringInput { merchant: string; name: string; amount_cents: number; cadence: Cadence; anchor_date: string; category_id: number | null }
+export interface RecurringInput {
+  merchant: string; name: string; amount_cents: number; cadence: Cadence; anchor_date: string; category_id: number | null; follows_paycheck: boolean
+}
 export interface UpcomingRow { date: string; item_id: number; name: string; amount_cents: number; balance_cents: number | null; late: boolean }
 export interface Upcoming { start_balance_cents: number | null; rows: UpcomingRow[]; bills_cents: number; income_cents: number }
 
