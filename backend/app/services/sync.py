@@ -8,7 +8,7 @@ from decimal import Decimal
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from ..models import Account, BalanceSnapshot, Holding, SyncRun, Transaction, utcnow
+from ..models import Account, BalanceSnapshot, Holding, PendingTransaction, SyncRun, Transaction, utcnow
 from ..money import to_cents
 from ..routers.category_budgets import MAX_AMOUNT_CENTS
 from . import simplefin
@@ -131,6 +131,7 @@ class _State:
     balance_dates: dict[int, dt.date] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
     new_txns: list[Transaction] = field(default_factory=list)
+    pending: dict[Account, dict[str, PendingTransaction]] = field(default_factory=dict)  # every returned account, even with none
 
 
 def _fetch_all(fetch: Fetch, start: dt.date, end: dt.date) -> list[dict]:
@@ -166,6 +167,33 @@ def _replace_holdings(db: Session, account: Account, holdings: list[dict], today
                        shares=shares, market_value_cents=value, cost_basis_cents=basis or None, as_of=today))
 
 
+def _pending_row(t: dict, today: dt.date) -> PendingTransaction | None:
+    """None for a row without an id or a usable amount or date; pending rows are display-only and must never fail the sync."""
+    try:
+        cents = to_cents(t["amount"]) if t.get("amount") is not None else None
+        stamp = t.get("transacted_at") or t.get("posted")
+        day = dt.datetime.fromtimestamp(stamp, dt.UTC).date() if stamp else today
+    except (ValueError, ArithmeticError, TypeError, OverflowError, OSError):
+        return None
+    if t.get("id") is None or cents is None or abs(cents) > MAX_AMOUNT_CENTS:
+        return None
+    return PendingTransaction(external_id=t["id"], posted_date=day, amount_cents=cents,
+                              raw_description=t.get("description") or "", raw_payee=t.get("payee") or None)
+
+
+def _replace_pending(db: Session, pending: dict[Account, dict[str, PendingTransaction]]) -> None:
+    """Each returned account's pending set is replaced; a closed account's is cleared, and ids already posted are dropped."""
+    for account, rows in pending.items():
+        db.execute(delete(PendingTransaction).where(PendingTransaction.account_id == account.id))
+        if account.closed_at is not None:
+            continue
+        posted = set(db.scalars(select(Transaction.external_id).where(Transaction.account_id == account.id)))
+        for row in rows.values():
+            if row.external_id not in posted:
+                row.account_id = account.id
+                db.add(row)
+
+
 def _ingest(db: Session, payloads: list[dict], today: dt.date, state: _State) -> None:
     for payload in payloads:
         state.errors += [e for e in payload.get("errors") or [] if e not in state.errors]
@@ -182,6 +210,10 @@ def _ingest(db: Session, payloads: list[dict], today: dt.date, state: _State) ->
                 stamp = acct.get("balance-date")
                 state.balance_dates[account.id] = dt.datetime.fromtimestamp(stamp, dt.UTC).date() if stamp else today
             state.new_txns += _insert_new(db, account, acct)
+            rows = state.pending.setdefault(account, {})
+            for t in acct.get("transactions") or []:
+                if t.get("pending") and (row := _pending_row(t, today)) is not None:
+                    rows.setdefault(row.external_id, row)  # windows overlap: the first copy wins
         db.flush()  # autoflush is off; the next window's duplicate check must see this one's rows
 
 
@@ -202,6 +234,7 @@ def _run(db: Session, fetch: Fetch, now: dt.datetime) -> SyncRun:
                 backfill = _fetch_all(fetch, floor, start)
         _ingest(db, payloads, today, state)  # main payloads first: balances are "first seen" from the latest window
         _ingest(db, backfill, today, state)
+        _replace_pending(db, state.pending)
         rules = load_rules(db)
         for txn in state.new_txns:
             apply_to(db, txn, rules)

@@ -36,6 +36,7 @@ export interface Txn {
   transfer_pair_id: number | null
 }
 export interface TxnPage { items: Txn[]; next_cursor: string | null; total: number }
+export interface PendingTxn { id: number; account_id: number; account_name: string; posted_date: string; merchant: string; amount_cents: number }
 export interface TxnFilters {
   start?: string
   end?: string
@@ -264,6 +265,7 @@ export const api = {
   sync: () => request<SyncRun>('/sync', send('POST')),
   syncRuns: () => request<SyncRun[]>('/sync/runs?limit=20'),
   transactions: (filters: TxnFilters, cursor?: string) => request<TxnPage>(`/transactions?${query({ ...filters, cursor })}`),
+  pending: (account_id?: number) => request<PendingTxn[]>(`/transactions/pending?${query({ account_id })}`),
   patchTxn: (id: number, body: TxnPatch) => request<Txn>(`/transactions/${id}`, send('PATCH', body)),
   markReviewed: (ids: number[]) => request<{ updated: number }>('/transactions/review', send('POST', { ids })),
   unlinkTransfer: (id: number) => request<void>(`/transactions/${id}/transfer`, send('DELETE')),

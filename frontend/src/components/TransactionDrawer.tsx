@@ -18,6 +18,7 @@ export default function TransactionDrawer({ txn, categories, onSaved, onClose }:
   const [tags, setTags] = useState(txn.tags.map((t) => t.name).join(', '))
   const [ruleCategory, setRuleCategory] = useState<number | null>(null)
   const [ruleText, setRuleText] = useState(txn.merchant.toLowerCase())
+  const [closing, setClosing] = useState(false)
 
   // Escape and the overlay both blur first, so the focused field's save fires before the drawer unmounts.
   const dismiss = useCallback(() => {
@@ -44,8 +45,8 @@ export default function TransactionDrawer({ txn, categories, onSaved, onClose }:
 
   return (
     <>
-      <div className="overlay" aria-hidden="true" onClick={dismiss} />
-      <aside className="drawer" role="dialog" aria-label={`Edit ${txn.merchant}`}>
+      <div className={`overlay${closing ? ' closing' : ''}`} aria-hidden="true" onClick={dismiss} />
+      <aside className={`drawer${closing ? ' closing' : ''}`} role="dialog" aria-label={`Edit ${txn.merchant}`} onAnimationEnd={closing ? onClose : undefined}>
         <div className="drawer-head">
           <div>
             <h2 className={`drawer-amount${txn.amount_cents > 0 ? ' pos' : ''}`}>{formatCents(txn.amount_cents)}</h2>
@@ -119,7 +120,7 @@ export default function TransactionDrawer({ txn, categories, onSaved, onClose }:
         </label>
 
         <div className="toolbar">
-          <button onClick={() => save.mutate({ reviewed: !txn.reviewed_at })}>{txn.reviewed_at ? 'Mark unreviewed' : 'Mark reviewed'}</button>
+          <button disabled={closing} onClick={() => save.mutate({ reviewed: !txn.reviewed_at }, { onSuccess: () => setClosing(true) })}>{txn.reviewed_at ? 'Mark unreviewed' : 'Mark reviewed'}</button>
           {txn.transfer_pair_id !== null && <button onClick={() => unlink.mutate()}>Unlink transfer</button>}
         </div>
         {txn.category_source !== 'none' && <p className="muted">Category set by {txn.category_source === 'user' ? 'you' : 'a rule'}.</p>}

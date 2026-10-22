@@ -231,6 +231,22 @@ class Holding(Base):
     account: Mapped[Account] = relationship()
 
 
+class PendingTransaction(Base):
+    """A pending charge as SimpleFIN last reported it; display only. An account's set is replaced on every sync."""
+
+    __tablename__ = "pending_transactions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), index=True)
+    external_id: Mapped[str]
+    posted_date: Mapped[dt.date]  # transacted_at, else posted, else the sync date
+    amount_cents: Mapped[int]
+    raw_description: Mapped[str]
+    raw_payee: Mapped[str | None]
+
+    account: Mapped[Account] = relationship()
+
+
 class AssetClass(Base):
     """Owner's override of a symbol's asset class (M4); symbols without a row use the default."""
 

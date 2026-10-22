@@ -1,4 +1,4 @@
-import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api, type Txn, type TxnFilters } from '../api'
@@ -7,6 +7,7 @@ import TransactionDrawer from '../components/TransactionDrawer'
 import { DATE_PRESETS, dollarsToCents, formatCents, formatDayHeading, groupByDay, presetRange, type DatePreset } from '../format'
 
 const DRILL_KEYS = ['start', 'end', 'category_id', 'uncategorized', 'merchant']
+const PAGE_SIZE = 100
 
 /** Drill-down links (Spending → Breakdown) carry filters in the URL; null when there are none. */
 function linkedFilters(p: URLSearchParams): TxnFilters | null {
@@ -24,8 +25,10 @@ function linkedFilters(p: URLSearchParams): TxnFilters | null {
 export default function Transactions() {
   const qc = useQueryClient()
   const [params, setParams] = useSearchParams()
-  const tab: 'all' | 'review' = params.get('tab') === 'review' ? 'review' : 'all'
-  const setTab = (t: 'all' | 'review') => setParams(t === 'review' ? { tab: 'review' } : {}, { replace: true })
+  type Tab = 'all' | 'review' | 'pending'
+  const tab: Tab = params.get('tab') === 'review' || params.get('tab') === 'pending' ? (params.get('tab') as Tab) : 'all'
+  const tabParams = (t: Tab): Record<string, string> => (t === 'all' ? {} : { tab: t })
+  const setTab = (t: Tab) => setParams(tabParams(t), { replace: true })
 
   const [linked] = useState(() => linkedFilters(params))
   const [preset, setPreset] = useState<DatePreset>(linked ? 'custom' : 'last90')
@@ -45,20 +48,33 @@ export default function Transactions() {
     queryFn: () => api.transactions({ needs_review: true, limit: 1, start: filters.start, end: filters.end }),
     placeholderData: keepPreviousData,
   })
-  const active: TxnFilters = { ...filters, needs_review: tab === 'review' }
-  const txns = useInfiniteQuery({
-    queryKey: ['transactions', active],
-    queryFn: ({ pageParam }) => api.transactions(active, pageParam),
-    initialPageParam: undefined as string | undefined,
-    getNextPageParam: (last) => last.next_cursor ?? undefined,
+  const active: TxnFilters = { ...filters, needs_review: tab === 'review', limit: PAGE_SIZE }
+  // Keyset pages: page N is fetched from the cursor that ended page N-1. A new tab or filter starts again at page 1.
+  const pageKey = JSON.stringify([tab, filters])
+  const [pager, setPager] = useState<{ key: string; cursors: (string | undefined)[] }>({ key: pageKey, cursors: [undefined] })
+  const cursors = pager.key === pageKey ? pager.cursors : [undefined]
+  const page = cursors.length - 1
+  const txns = useQuery({
+    queryKey: ['transactions', active, cursors[page]],
+    queryFn: () => api.transactions(active, cursors[page]),
+    placeholderData: keepPreviousData,
+    enabled: tab !== 'pending',
+  })
+  const goTo = (next: (string | undefined)[]) => { setPager({ key: pageKey, cursors: next }); window.scrollTo({ top: 0 }) }
+  const pending = useQuery({
+    queryKey: ['transactions', 'pending', filters.account_id],
+    queryFn: () => api.pending(filters.account_id),
     placeholderData: keepPreviousData,
   })
+  const sync = useMutation({ mutationFn: api.sync, onSuccess: () => qc.invalidateQueries() })
   const review = useMutation({
     mutationFn: api.markReviewed,
-    onSuccess: () => { setChecked(new Set()); qc.invalidateQueries({ queryKey: ['transactions'] }) },
+    onSuccess: () => { setChecked(new Set()); setPager({ key: pageKey, cursors: [undefined] }); qc.invalidateQueries({ queryKey: ['transactions'] }) },
   })
-  const rows = txns.data?.pages.flatMap((p) => p.items) ?? []
+  const rows = txns.data?.items ?? []
+  const total = txns.data?.total ?? 0
   const selectedIds = rows.filter((r) => checked.has(r.id)).map((r) => r.id)
+  const allChecked = rows.length > 0 && selectedIds.length === rows.length
   const categoryById = new Map(categories.data?.map((c) => [c.id, c]))
 
   useEffect(() => { setChecked(new Set()) }, [tab, filters])
@@ -67,7 +83,7 @@ export default function Transactions() {
   function patch(p: Partial<TxnFilters>) {
     // A real change means the user now owns the filters; drop the drill-down params so a reload doesn't re-apply a removed one.
     const changed = (Object.keys(p) as (keyof TxnFilters)[]).some((k) => filters[k] !== p[k])
-    if (changed && DRILL_KEYS.some((k) => params.has(k))) setParams(tab === 'review' ? { tab: 'review' } : {}, { replace: true })
+    if (changed && DRILL_KEYS.some((k) => params.has(k))) setParams(tabParams(tab), { replace: true })
     setFilters((f) => ((Object.keys(p) as (keyof TxnFilters)[]).every((k) => f[k] === p[k]) ? f : { ...f, ...p }))
   }
   const applyQ = (v: string) => patch({ q: v.trim() || undefined })
@@ -87,7 +103,7 @@ export default function Transactions() {
     setPreset('last90')
     setQText(''); setMinText(''); setMaxText(''); setMoreOpen(false)
     setFilters(presetRange('last90'))
-    setParams(tab === 'review' ? { tab: 'review' } : {}, { replace: true })
+    setParams(tabParams(tab), { replace: true })
   }
 
   function toggle(id: number) {
@@ -106,7 +122,15 @@ export default function Transactions() {
 
   return (
     <section>
-      <header className="page-head"><h1>Transactions</h1></header>
+      <header className="page-head">
+        <h1>Transactions</h1>
+        <div className="actions">
+          {sync.data && <span className={`pill ${sync.data.status}`} role="status">{sync.data.status} · {sync.data.txns_added} new</span>}
+          {sync.data?.error && <span className="error" role="alert">{sync.data.error}</span>}
+          {sync.error && <span className="error" role="alert">{sync.error.message}</span>}
+          <button className="btn-white" onClick={() => sync.mutate()} disabled={sync.isPending}>{sync.isPending ? 'Syncing…' : 'Sync now'}</button>
+        </div>
+      </header>
       <div className="pills" role="group" aria-label="Filters">
         <select className="pill" aria-label="Date range" value={preset} onChange={(e) => choosePreset(e.target.value as DatePreset)}>
           {DATE_PRESETS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -179,17 +203,49 @@ export default function Transactions() {
         <button role="tab" aria-selected={tab === 'review'} className={tab === 'review' ? 'active' : ''} onClick={() => setTab('review')}>
           To review ({reviewCount.data?.total ?? '…'})
         </button>
+        <button role="tab" aria-selected={tab === 'pending'} className={tab === 'pending' ? 'active' : ''} onClick={() => setTab('pending')}>
+          Pending ({pending.data?.length ?? '…'})
+        </button>
       </div>
       {tab === 'review' && (
         <div className="toolbar">
           <button className="primary" disabled={selectedIds.length === 0 || review.isPending || txns.isPlaceholderData} onClick={() => review.mutate(selectedIds)}>
             {selectedIds.length ? `Mark ${selectedIds.length} reviewed` : 'Mark reviewed'}
           </button>
-          <button disabled={txns.isPlaceholderData} onClick={() => setChecked(new Set(rows.map((r) => r.id)))}>Select all loaded</button>
+          <button disabled={txns.isPlaceholderData} onClick={() => setChecked(allChecked ? new Set() : new Set(rows.map((r) => r.id)))}>
+            {allChecked ? 'Unselect all' : 'Select all on page'}
+          </button>
         </div>
       )}
       {(txns.error || review.error) && <p className="error" role="alert">{(txns.error ?? review.error)?.message}</p>}
 
+      {tab === 'pending' ? (
+        <>
+          {pending.error && <p className="error" role="alert">{pending.error.message}</p>}
+          <p className="muted">Pending charges can change or drop off. They move to All once they post. Only the account filter applies here.</p>
+          <div className="tx-list" aria-busy={pending.isPlaceholderData || undefined}>
+            {groupByDay(pending.data ?? []).map(({ day, items }) => (
+              <div className="day-group" key={day}>
+                <h2 className="day-heading">{formatDayHeading(day)}</h2>
+                <div className="card">
+                  {items.map((p) => (
+                    <div key={p.id} className="tx-row pending">
+                      <div className="tx-main">
+                        <strong className="tx-merchant">{p.merchant}</strong>
+                        <span className="tx-sub">{p.account_name} · Pending</span>
+                      </div>
+                      <span className={`amount${p.amount_cents > 0 ? ' pos' : ''}`}>{formatCents(p.amount_cents)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          {pending.isLoading && <p className="muted" role="status">Loading…</p>}
+          {pending.data?.length === 0 && <p className="muted">No pending transactions.</p>}
+        </>
+      ) : (
+      <>
       <div className="tx-list" aria-busy={txns.isPlaceholderData || undefined}>
       {groupByDay(rows).map(({ day, items }) => (
         <div className="day-group" key={day}>
@@ -223,14 +279,13 @@ export default function Transactions() {
       </div>
       {txns.isLoading && <p className="muted" role="status">Loading…</p>}
       {!txns.isLoading && rows.length === 0 && <p className="muted">No transactions match.</p>}
-      <div className="toolbar" style={{ marginTop: '1rem' }}>
-        {txns.hasNextPage && (
-          <button onClick={() => txns.fetchNextPage()} disabled={txns.isFetchingNextPage}>
-            {txns.isFetchingNextPage ? 'Loading…' : 'Load more'}
-          </button>
-        )}
-        <span className="muted">{txns.data?.pages[0]?.total ?? 0} transactions</span>
-      </div>
+      <nav className="toolbar" aria-label="Pages" style={{ marginTop: '1rem' }}>
+        <button onClick={() => goTo(cursors.slice(0, -1))} disabled={page === 0 || txns.isPlaceholderData}>← Prev</button>
+        <span className="muted">Page {page + 1} of {Math.max(1, Math.ceil(total / PAGE_SIZE))} · {total} transactions</span>
+        <button onClick={() => goTo([...cursors, txns.data?.next_cursor ?? undefined])} disabled={!txns.data?.next_cursor || txns.isPlaceholderData}>Next →</button>
+      </nav>
+      </>
+      )}
 
       {selected && categories.data && (
         <TransactionDrawer key={selected.id} txn={selected} categories={categories.data} onSaved={(t) => setSelected((prev) => (prev?.id === t.id ? t : prev))} onClose={() => setSelected(null)} />

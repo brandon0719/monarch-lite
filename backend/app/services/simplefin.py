@@ -29,7 +29,7 @@ def _epoch(d: dt.date) -> str:
 
 
 def fetch_accounts(start: dt.date, end: dt.date, token: str | None = None) -> dict:
-    """Balances plus posted transactions in [start, end). Pending ones are not requested.
+    """Balances plus transactions in [start, end), pending ones included (flagged `pending`; sync stores them apart).
 
     SimpleFIN recommends windows of 45 days or less; callers chunk (see services/sync.py).
     The payload's `errors` list is returned, not raised, so one broken bank can't block the rest.
@@ -41,7 +41,7 @@ def fetch_accounts(start: dt.date, end: dt.date, token: str | None = None) -> di
     try:
         resp = requests.get(
             f"{base}/accounts",
-            params={"start-date": _epoch(start), "end-date": _epoch(end)},
+            params={"start-date": _epoch(start), "end-date": _epoch(end), "pending": 1},
             auth=auth,
             timeout=60,
         )
