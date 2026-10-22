@@ -64,7 +64,8 @@ def test_old_or_failed_sync_is_stale(client, db):
     db.add(SyncRun(started_at=utcnow(), finished_at=utcnow(), status="failed"))
     db.commit()
     (alert,) = of_kind(client, "sync_stale")
-    assert alert["key"] == f"stale:{old.date()}" and str(old.date()) in alert["detail"]
+    local = old.replace(tzinfo=dt.UTC).astimezone().date()  # the detail shows the server's local date
+    assert alert["key"] == f"stale:{old.date()}" and str(local) in alert["detail"]
 
 
 def test_stale_detail_shows_the_local_date_but_the_key_keeps_the_utc_date(client, db, monkeypatch):

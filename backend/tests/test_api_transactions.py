@@ -115,3 +115,21 @@ def test_patch_rejects_blank_merchant(client, db):
     assert client.patch(f"/api/transactions/{a.id}", json={"merchant": "   "}).status_code == 422
     db.refresh(a)
     assert (a.merchant, a.merchant_locked) == ("Netflix", False)
+
+
+def test_pending_list_is_newest_first_and_hides_hidden_accounts(client, db):
+    from app.models import PendingTransaction
+    card = make_account(db, name="Card")
+    hidden = make_account(db, name="Old", is_hidden=True)
+    db.add_all([
+        PendingTransaction(account=card, external_id="p1", posted_date=dt.date(2026, 10, 19), amount_cents=-645, raw_description="SQ *BLUE BOTTLE 0423"),
+        PendingTransaction(account=card, external_id="p2", posted_date=dt.date(2026, 10, 20), amount_cents=-2410, raw_description="UBER *EATS", raw_payee="Uber Eats"),
+        PendingTransaction(account=hidden, external_id="p3", posted_date=dt.date(2026, 10, 20), amount_cents=-100, raw_description="X"),
+    ])
+    db.commit()
+    rows = client.get("/api/transactions/pending").json()
+    assert [(r["merchant"], r["account_name"], r["posted_date"], r["amount_cents"]) for r in rows] == [
+        ("Uber Eats", "Card", "2026-10-20", -2410), ("Blue Bottle", "Card", "2026-10-19", -645),
+    ]
+    assert [r["amount_cents"] for r in client.get("/api/transactions/pending", params={"account_id": hidden.id}).json()] == [-100]
+    assert client.get("/api/transactions/pending", params={"account_id": 0}).status_code == 422

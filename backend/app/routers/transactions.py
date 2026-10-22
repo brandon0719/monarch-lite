@@ -1,4 +1,4 @@
-"""FR-TXN-01..04, FR-TXN-07 unlink."""
+"""FR-TXN-01..04, FR-TXN-07 unlink, and the read-only pending list."""
 import datetime as dt
 from typing import Annotated
 
@@ -8,7 +8,8 @@ from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session, contains_eager, joinedload, selectinload
 
 from ..db import get_db
-from ..models import Account, Category, Tag, Transaction, utcnow
+from ..models import Account, Category, PendingTransaction, Tag, Transaction, utcnow
+from ..services.merchant import clean
 from ..services.tags import get_or_create_tag
 from ..services.transfers import unlink
 from .category_budgets import MAX_AMOUNT_CENTS
@@ -46,6 +47,15 @@ class TxnPage(BaseModel):
     items: list[TxnOut]
     next_cursor: str | None
     total: int
+
+
+class PendingOut(BaseModel):
+    id: int
+    account_id: int
+    account_name: str
+    posted_date: dt.date
+    merchant: str
+    amount_cents: int
 
 
 class TxnPatch(BaseModel):
@@ -157,6 +167,18 @@ def list_transactions(
     rows = db.scalars(stmt.order_by(Transaction.posted_date.desc(), Transaction.id.desc()).limit(limit + 1)).unique().all()
     next_cursor = f"{rows[limit - 1].posted_date.isoformat()}:{rows[limit - 1].id}" if len(rows) > limit else None
     return TxnPage(items=[to_out(t) for t in rows[:limit]], next_cursor=next_cursor, total=total)
+
+
+@router.get("/pending", response_model=list[PendingOut])
+def list_pending(account_id: OptionalIdQuery = None, db: Session = Depends(get_db)):
+    cond = PendingTransaction.account_id == account_id if account_id is not None else Account.is_hidden.is_(False)
+    rows = db.scalars(
+        select(PendingTransaction).join(PendingTransaction.account).where(cond)
+        .options(contains_eager(PendingTransaction.account))
+        .order_by(PendingTransaction.posted_date.desc(), PendingTransaction.id.desc())
+    ).all()
+    return [PendingOut(id=p.id, account_id=p.account_id, account_name=p.account.name, posted_date=p.posted_date,
+                       merchant=clean(p.raw_description, p.raw_payee), amount_cents=p.amount_cents) for p in rows]
 
 
 @router.patch("/{txn_id}", response_model=TxnOut)

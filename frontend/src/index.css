@@ -63,6 +63,8 @@ button:active:not(:disabled), .button:active { transform: scale(0.98); }
 button.primary { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
 button.primary:hover:not(:disabled) { background: var(--primary-hover); }
 button:disabled { opacity: .5; cursor: default; }
+button.btn-white { background: #ffffff; color: #161513; border-color: var(--line); }  /* white in both themes, by request */
+button.btn-white:hover:not(:disabled) { background: #ece8e1; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 input, select, textarea { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: .35rem .6rem; }
 a { color: var(--accent); }
@@ -152,6 +154,8 @@ select.pill { padding-right: .6rem; }
 .tx-row { display: flex; align-items: center; gap: var(--s4); padding: var(--s3) var(--s5); border-bottom: 1px solid var(--line); cursor: pointer; }
 .tx-row:last-child { border-bottom: none; }
 .tx-row:hover { background: var(--hover); }
+.tx-row.pending { cursor: default; }
+.tx-row.pending:hover { background: none; }
 .tx-row:focus-visible { outline-offset: -2px; background: var(--hover); }
 .tx-list[aria-busy="true"] { opacity: .6; }
 .tx-main { flex: 1; min-width: 0; }
@@ -380,6 +384,8 @@ tbody tr:last-child td { border-bottom: none; }
 .tabs button:hover:not(:disabled) { background: none; color: var(--ink); }
 .tabs button.active { color: var(--ink); border-bottom: 1px solid var(--ink); }
 .drawer { position: fixed; top: 0; right: 0; bottom: 0; z-index: 41; width: min(420px, 100vw); background: var(--surface); border-left: 1px solid var(--line); padding: 1.5rem; overflow-y: auto; display: flex; flex-direction: column; gap: .9rem; }
+.overlay.closing, .drawer.closing { animation: fade-out .5s ease forwards; pointer-events: none; }
+@keyframes fade-out { to { opacity: 0; } }
 .drawer label { display: flex; flex-direction: column; gap: .25rem; font-size: .85rem; color: var(--ink-2); }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: .6rem; align-items: end; }
 .form-grid label { display: flex; flex-direction: column; gap: .25rem; font-size: .8rem; color: var(--ink-2); }

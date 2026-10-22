@@ -372,3 +372,49 @@ def test_non_dict_and_out_of_range_holdings_are_skipped_and_commas_stripped(db):
     rows = db.scalars(select(Holding).order_by(Holding.symbol)).all()
     assert [(h.symbol, h.shares, h.market_value_cents) for h in rows] == [
         ("EDGE", "1", MAX_AMOUNT_CENTS), ("VTI", "1234.5", 20000)]
+
+
+def pending_rows(db):
+    from app.models import PendingTransaction
+    rows = db.scalars(select(PendingTransaction).join(PendingTransaction.account).order_by(PendingTransaction.external_id)).all()
+    return [(p.account.external_id, p.external_id, p.posted_date, p.amount_cents, p.raw_description) for p in rows]
+
+
+def test_pending_rows_are_snapshotted_and_replaced(db):
+    sync.run_sync(db, fetch=fetcher(payload()), now=NOW)
+    assert pending_rows(db) == [("sf-chk", "t3", NOW.date(), -450, "SQ *BLUE BOTTLE 0423")]  # no dates: the sync date
+    assert db.scalar(select(Transaction).where(Transaction.external_id == "t3")) is None   # never a real transaction
+
+    second = payload()
+    second["accounts"][0]["transactions"][2] = {"id": "t5", "posted": 0, "transacted_at": epoch(2026, 10, 16), "amount": "-12.00",
+                                                "description": "UBER EATS", "pending": True}
+    second["accounts"][1]["transactions"].append({"id": "s9", "posted": epoch(2026, 10, 15), "amount": "1.00",
+                                                  "description": "INTEREST", "pending": True})
+    sync.run_sync(db, fetch=fetcher(second), now=NOW + dt.timedelta(days=1))
+    assert pending_rows(db) == [("sf-sav", "s9", dt.date(2026, 10, 15), 100, "INTEREST"),
+                                ("sf-chk", "t5", dt.date(2026, 10, 16), -1200, "UBER EATS")]
+
+    third = payload(include_savings=False)
+    third["accounts"][0]["transactions"].pop()
+    sync.run_sync(db, fetch=fetcher(third), now=NOW + dt.timedelta(days=2))
+    assert pending_rows(db) == [("sf-sav", "s9", dt.date(2026, 10, 15), 100, "INTEREST")]  # savings not returned: kept
+
+
+def test_pending_skips_posted_ids_bad_rows_and_closed_accounts(db):
+    p = payload(include_savings=False)
+    p["accounts"][0]["transactions"] += [
+        {"id": "t1", "posted": 0, "amount": "-9.99", "description": "NETFLIX.COM", "pending": True},  # already posted under this id
+        {"posted": 0, "amount": "-1.00", "description": "NO ID", "pending": True},
+        {"id": "x1", "posted": 0, "description": "NO AMOUNT", "pending": True},
+        {"id": "x2", "posted": 0, "amount": "abc", "description": "BAD AMOUNT", "pending": True},
+        {"id": "x3", "posted": 0, "amount": "NaN", "description": "NAN", "pending": True},
+        {"id": "x4", "posted": 0, "amount": "1e15", "description": "HUGE", "pending": True},
+    ]
+    run = sync.run_sync(db, fetch=fetcher(p), now=NOW)  # every chunk repeats the payload: duplicate ids collapse
+    assert run.status == "success"
+    assert pending_rows(db) == [("sf-chk", "t3", NOW.date(), -450, "SQ *BLUE BOTTLE 0423")]
+    acct = db.scalar(select(Account).where(Account.external_id == "sf-chk"))
+    acct.closed_at = NOW.date()
+    db.commit()
+    sync.run_sync(db, fetch=fetcher(p), now=NOW + dt.timedelta(days=1))
+    assert pending_rows(db) == []

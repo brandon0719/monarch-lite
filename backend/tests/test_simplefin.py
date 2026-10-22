@@ -25,7 +25,7 @@ def epoch(d: dt.date) -> str:
     return str(int(dt.datetime(d.year, d.month, d.day, tzinfo=dt.UTC).timestamp()))
 
 
-def test_sends_window_and_basic_auth_without_pending(monkeypatch):
+def test_sends_window_basic_auth_and_pending(monkeypatch):
     seen = {}
 
     def fake_get(url, params, auth, timeout):
@@ -36,7 +36,7 @@ def test_sends_window_and_basic_auth_without_pending(monkeypatch):
     simplefin.fetch_accounts(dt.date(2026, 1, 1), dt.date(2026, 2, 1), token=TOKEN)
     assert seen["url"] == "https://bridge.example/simplefin/accounts"
     assert seen["auth"] == ("user", "secret")
-    assert seen["params"] == {"start-date": epoch(dt.date(2026, 1, 1)), "end-date": epoch(dt.date(2026, 2, 1))}
+    assert seen["params"] == {"start-date": epoch(dt.date(2026, 1, 1)), "end-date": epoch(dt.date(2026, 2, 1)), "pending": 1}
 
 
 def test_403_raises_auth_error(monkeypatch):
